@@ -9,7 +9,7 @@ from googleapiclient.discovery import build
 
 from . import config
 
-# Local http://localhost redirect is fine for a personal desktop app.
+# Local redirect is the default; Render should set GOOGLE_REDIRECT_URI.
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
@@ -17,7 +17,7 @@ os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 SCOPES = ["https://www.googleapis.com/auth/gmail.compose"]
 CRED = config.ROOT / "credentials.json"
 TOKEN = config.ROOT / "token.json"
-REDIRECT = f"http://localhost:{config.PORT}/auth/google/callback"
+REDIRECT = os.getenv("GOOGLE_REDIRECT_URI", f"http://localhost:{config.PORT}/auth/google/callback")
 _flow = None  # single-user local app: keep the flow (and its PKCE verifier) between login and callback
 
 

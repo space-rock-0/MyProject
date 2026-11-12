@@ -16,6 +16,19 @@ Local app that drafts emails, LinkedIn messages, form answers and cover letters 
 Permission requested is `gmail.compose` only. It cannot read your inbox. This app only creates drafts.
 While the Google app is in Testing, the Gmail login expires every 7 days. Click Connect again.
 
+## Render deployment
+
+Create a Render Web Service from this repository:
+
+- Build command: `pip install -r requirements.txt`
+- Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Add `GROQ_API_KEY`, `GROQ_MODELS`, and `DATA_DIR=Personal Drive` as environment variables.
+- Add `GOOGLE_REDIRECT_URI=https://YOUR-SERVICE.onrender.com/auth/google/callback`.
+- Add a Render secret file named `credentials.json` containing the Google OAuth client JSON.
+- Add the same callback URL under Google Cloud Console > Credentials > OAuth client > Authorized redirect URIs.
+
+Do not upload `.env`, `credentials.json`, or `token.json` to GitHub. Gmail tokens stored on Render's normal filesystem can be lost when the service restarts; use persistent storage if you need the connection to survive restarts.
+
 ## Your files (Personal Drive/)
 
 | File | Used for |
