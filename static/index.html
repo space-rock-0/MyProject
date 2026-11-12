@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Personal Drafter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#EDF0F4; --surface:#FFFFFF; --paper:#FFFFFF; --ink:#101B2D; --muted:#5A6779; --line:#D3DAE4;
+  --blue:#1F46C8; --blue-ink:#FFFFFF; --red:#D2332B; --amber-bg:#FFF4D6; --amber-ink:#7A5200;
+  --rail:#12203D; --rail-ink:#E8EDF7; --rail-muted:#9DAAC4; --ok:#1E7A4B;
+  --ui:"Hanken Grotesk",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --serif:"Newsreader",Georgia,"Times New Roman",serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#0B1322; --surface:#121C30; --paper:#16223A; --ink:#E8EDF5; --muted:#93A0B4; --line:#25324B;
+    --blue:#7F9CFF; --blue-ink:#0B1322; --red:#FF6B5E; --amber-bg:#3A2E10; --amber-ink:#FFD98A; --rail:#0A1120; --ok:#5FD39A;}
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--ui);-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+
+.app{display:grid;grid-template-columns:216px minmax(340px,430px) 1fr;height:100vh}
+.rail{background:var(--rail);color:var(--rail-ink);display:flex;flex-direction:column;padding:22px 14px;gap:6px;overflow:auto}
+.brand{font-weight:700;font-size:17px;letter-spacing:.2px;padding:2px 10px 18px}
+.brand small{display:block;font-weight:400;font-size:13px;color:var(--rail-muted);margin-top:2px}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav button{all:unset;cursor:pointer;padding:9px 12px;border-radius:8px;border-left:3px solid transparent;color:var(--rail-muted);font-weight:500}
+.nav button:hover{background:rgba(255,255,255,.06);color:var(--rail-ink)}
+.nav button[aria-current=true]{background:rgba(255,255,255,.1);color:#fff;border-left-color:var(--red)}
+.nav button:focus-visible{outline:2px solid #fff;outline-offset:-2px}
+.status{margin-top:auto;display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--rail-muted);padding:0 4px}
+.chip{display:flex;gap:8px;align-items:flex-start}
+.dot{width:8px;height:8px;border-radius:50%;background:#6C7893;margin-top:6px;flex:none}
+.dot.ok{background:#4CD19A}.dot.bad{background:var(--red)}
+.linkbtn{all:unset;cursor:pointer;color:#fff;text-decoration:underline;text-underline-offset:3px}
+.linkbtn:focus-visible{outline:2px solid #fff}
+
+.inputs{padding:26px 24px 0;overflow:auto;display:flex;flex-direction:column;border-right:1px solid var(--line)}
+.inputs h1{font-size:22px;margin:0 0 2px;font-weight:700}
+.inputs .hint{color:var(--muted);margin:0 0 18px;max-width:46ch}
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+.field label{font-size:13px;font-weight:600;color:var(--muted)}
+.field small{font-size:12px;color:var(--muted)}
+input,select,textarea{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 11px;width:100%}
+textarea{resize:vertical;min-height:70px;line-height:1.45}
+.sticky{position:sticky;bottom:0;background:linear-gradient(to top,var(--bg) 70%,transparent);padding:14px 0 22px;margin-top:auto;display:flex;gap:10px;align-items:center}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:var(--blue-ink)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn[disabled]{opacity:.6;cursor:progress}
+.kbd{font-size:12px;color:var(--muted)}
+.linkish{background:none;border:0;color:var(--muted);text-decoration:underline;text-underline-offset:3px;cursor:pointer;padding:0;font-size:13px}
+
+.output{padding:26px 28px;overflow:auto}
+.empty{max-width:46ch;color:var(--muted);margin-top:12vh}
+.empty h2{color:var(--ink);font-family:var(--serif);font-weight:500;font-size:28px;margin:0 0 8px}
+.letter{max-width:760px;margin:0 auto;background:var(--paper);border:1px solid var(--line);border-radius:4px;box-shadow:0 1px 2px rgba(16,27,45,.06),0 12px 32px -18px rgba(16,27,45,.25)}
+.stripe{height:9px;background:repeating-linear-gradient(135deg,var(--red) 0 14px,var(--paper) 14px 22px,var(--blue) 22px 36px,var(--paper) 36px 44px)}
+.lbody{padding:22px 28px 6px}
+.row{display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--line);padding:6px 0}
+.row label{width:58px;color:var(--muted);font-size:13px;font-weight:600;flex:none}
+.row input{border:0;background:transparent;padding:6px 0;border-radius:0}
+.row input:focus-visible{outline-offset:4px}
+.paper{display:block;border:0;background:transparent;font:17px/1.65 var(--serif);padding:18px 0 8px;min-height:180px;resize:none;overflow:hidden}
+.paper:focus-visible{outline:none}
+.attach{display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:13px;color:var(--muted);padding:10px 0 14px;border-top:1px dashed var(--line)}
+.attach select{width:auto;padding:5px 8px}
+.attach a{color:var(--blue)}
+.actions{display:flex;flex-wrap:wrap;gap:10px;padding:8px 28px 18px;align-items:center}
+.count{margin-left:auto;font-size:13px;color:var(--muted)}
+.count.warn{color:var(--red);font-weight:600}
+.facts{display:flex;flex-wrap:wrap;gap:4px 18px;padding:0 28px 16px;margin:0;font-size:12px;color:var(--muted)}
+.facts b{font-weight:600;color:var(--ink)}
+.qa{padding:18px 28px;border-bottom:1px solid var(--line)}
+.qa:last-of-type{border-bottom:0}
+.qa .q{font-weight:600;font-size:14px;margin:0 0 4px}
+.qa .paper{padding:6px 0;min-height:60px;font-size:16.5px}
+.qa .tools{display:flex;gap:12px;align-items:center;font-size:13px;color:var(--muted)}
+.badge{background:var(--amber-bg);color:var(--amber-ink);border-radius:999px;padding:1px 9px;font-size:12px;font-weight:600}
+.note{font-size:13px;color:var(--muted);margin:0 0 10px}
+.slow{font-size:13px;color:var(--muted);padding-bottom:10px}
+#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-weight:500;max-width:min(560px,90vw);opacity:0;pointer-events:none;transition:opacity .18s}
+#toast.show{opacity:1;pointer-events:auto}
+#toast.err{background:var(--red);color:#fff}
+#toast a{color:inherit;text-decoration:underline}
+
+@media (max-width:1020px){
+  .app{display:block;height:auto}
+  .rail{flex-direction:row;align-items:center;padding:10px 12px;overflow-x:auto}
+  .brand{padding:0 12px 0 0}.brand small{display:none}
+  .nav{flex-direction:row}.nav button{white-space:nowrap;border-left:0;border-bottom:3px solid transparent}
+  .nav button[aria-current=true]{border-bottom-color:var(--red)}
+  .status{display:none}
+  .inputs{border-right:0;overflow:visible}
+  .output{overflow:visible;padding:18px 12px 40px}
+  .empty{margin-top:4vh}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="brand">Personal Drafter<small id="who"></small></div>
+    <nav class="nav" id="nav" aria-label="Draft type"></nav>
+    <div class="status" id="status"></div>
+  </aside>
+  <section class="inputs" id="inputs" aria-label="Inputs"></section>
+  <main class="output" id="output" aria-live="polite"></main>
+</div>
+<div id="toast" role="status"></div>
+
+<script>
+(() => {
+const LS = 'pd.vals.v1';
+let vals = JSON.parse(localStorage.getItem(LS) || '{}');
+let meta = null, mode = localStorage.getItem('pd.mode') || 'email', busy = false;
+const results = {};
+
+const h = (tag, props = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? '' : v);
+  }
+  kids.flat().forEach(c => { if (c != null && c !== false) e.append(c.nodeType ? c : document.createTextNode(c)); });
+  return e;
+};
+const $ = s => document.querySelector(s);
+
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined);
+  let data = null; try { data = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error((data && data.detail) || `Request failed (${r.status})`);
+  return data;
+}
+let toastTimer;
+function toast(msg, err = false, link) {
+  const t = $('#toast'); t.className = (err ? 'err ' : '') + 'show'; t.textContent = msg + ' ';
+  if (link) t.append(h('a', { href: link.url, target: '_blank', rel: 'noopener' }, link.label));
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = '', err ? 7000 : 5000);
+}
+async function copy(text, label = 'Copied') {
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) { const t = h('textarea'); t.value = text; document.body.append(t); t.select(); document.execCommand('copy'); t.remove(); }
+  toast(label);
+}
+const autosize = t => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; };
+const words = s => (s.trim().match(/\S+/g) || []).length;
+const fmt = n => (n || 0).toLocaleString();
+
+/* ---------- field + mode definitions ---------- */
+const F = {
+  recipient_type: { label: 'Writing to', type: 'select', opts: () => [['recruiter', 'Recruiter or HR'], ['employee', 'Employee or team member'], ['founder', 'Founder or CTO'], ['general', 'No specific opening']] },
+  recipient_name: { label: 'Their name', ph: 'Priya Sharma' },
+  recipient_email: { label: 'Their email', ph: 'priya@company.com', hint: 'Only used to address the Gmail draft.' },
+  person_name: { label: 'Their name', ph: 'Priya Sharma' },
+  person_role: { label: 'Their role and team', ph: 'Senior engineer, Search team' },
+  company: { label: 'Company', ph: 'Acme Corp' },
+  job_title: { label: 'Job title', ph: 'AI Engineer' },
+  job_link: { label: 'Job link or requisition ID', ph: 'https://...' },
+  jd: { label: 'Job description', type: 'area', rows: 7, ph: 'Paste the full posting. It decides which resume and which projects get featured.' },
+  company_info: { label: 'Company notes', type: 'area', rows: 3, ph: 'Product, stack, recent news. Optional.' },
+  person_info: { label: 'About them', type: 'area', rows: 3, ph: 'Their LinkedIn summary, recent posts, shared interests. Optional.' },
+  domain: { label: 'Your target domain', ph: 'AI/ML or software engineering' },
+  stage: { label: 'Message type', type: 'select', opts: () => meta.linkedin_templates.map(t => [t.id, `${t.label}`]) },
+  resume: { label: 'Resume', type: 'select', opts: () => [['auto', 'Pick the best match for me'], ...meta.resumes.map(r => [r.key, `${r.key.toUpperCase()} resume`])] },
+  questions: { label: 'Form questions', type: 'area', rows: 9, ph: 'Paste one question, or several separated by a line with ---', hint: 'Answers use your full combined resume.' },
+  limit_words: { label: 'Words per answer', type: 'number', ph: '60' },
+  location: { label: 'Company location', ph: 'Bengaluru, India' },
+};
+const MODES = {
+  email: { label: 'Email', title: 'Email draft', hint: 'Picks the matching template and resume, then saves a draft in Gmail with the PDF attached.', endpoint: '/api/email',
+    fields: ['recipient_type', 'recipient_name', 'recipient_email', 'company', 'job_title', 'job_link', 'jd', 'company_info', 'person_info', 'resume'] },
+  linkedin: { label: 'LinkedIn', title: 'LinkedIn message', hint: 'Connection note, first message, or referral ask, based on your templates.', endpoint: '/api/linkedin',
+    fields: ['stage', 'person_name', 'person_role', 'company', 'job_title', 'job_link', 'jd', 'person_info', 'company_info', 'domain'] },
+  form: { label: 'Form answers', title: 'Application form answers', hint: 'Short, personal answers written from your resume. Anything it cannot know is marked for you to fill.', endpoint: '/api/form',
+    fields: ['questions', 'limit_words', 'company', 'job_title', 'jd', 'company_info'] },
+  cover: { label: 'Cover letter', title: 'Cover letter', hint: 'Fills your CV template for one role.', endpoint: '/api/cover',
+    fields: ['company', 'location', 'job_title', 'jd', 'company_info'] },
+};
+const save = () => localStorage.setItem(LS, JSON.stringify(vals));
+
+/* ---------- rail ---------- */
+function renderRail() {
+  $('#who').textContent = meta.profile.name;
+  const nav = $('#nav'); nav.replaceChildren();
+  for (const [k, m] of Object.entries(MODES)) {
+    nav.append(h('button', { type: 'button', 'aria-current': String(k === mode), onclick: () => { mode = k; localStorage.setItem('pd.mode', k); renderAll(); } }, m.label));
+  }
+  const st = $('#status'); st.replaceChildren();
+  const g = meta.gmail;
+  if (!g.configured) st.append(h('div', { class: 'chip' }, h('span', { class: 'dot' }), h('span', {}, 'Gmail not set up. Add credentials.json (README step 3).')));
+  else if (!g.connected) st.append(h('div', { class: 'chip' }, h('span', { class: 'dot bad' }), h('span', {}, 'Gmail not connected. ', h('a', { class: 'linkbtn', href: '/auth/google/login' }, 'Connect'))));
+  else st.append(h('div', { class: 'chip' }, h('span', { class: 'dot ok' }), h('span', {}, `Gmail: ${g.email} `, h('button', { class: 'linkbtn', type: 'button', onclick: async () => { await api('/api/gmail/disconnect', {}); await loadMeta(); } }, 'Disconnect'))));
+  st.append(h('div', { class: 'chip' }, h('span', { class: meta.has_key ? 'dot ok' : 'dot bad' }), h('span', {}, meta.has_key ? `Groq: ${meta.models[0]}` : 'No GROQ_API_KEY in .env')));
+}
+
+/* ---------- inputs ---------- */
+function renderInputs() {
+  const m = MODES[mode], box = $('#inputs'); box.replaceChildren(h('h1', {}, m.title), h('p', { class: 'hint' }, m.hint));
+  for (const id of m.fields) {
+    const f = F[id], fid = 'f-' + id; let ctl;
+    if (f.type === 'select') {
+      ctl = h('select', { id: fid }, f.opts().map(([v, l]) => h('option', { value: v }, l)));
+      if (vals[id] && [...ctl.options].some(o => o.value === vals[id])) ctl.value = vals[id]; else { ctl.selectedIndex = 0; vals[id] = ctl.value; }
+    } else if (f.type === 'area') {
+      ctl = h('textarea', { id: fid, rows: f.rows || 3, placeholder: f.ph || '' }); ctl.value = vals[id] || '';
+    } else {
+      ctl = h('input', { id: fid, type: f.type || 'text', placeholder: f.ph || '', autocomplete: 'off' }); ctl.value = vals[id] ?? (id === 'limit_words' ? '60' : '');
+    }
+    ctl.addEventListener('input', () => { vals[id] = ctl.value; save(); });
+    box.append(h('div', { class: 'field' }, h('label', { for: fid }, f.label), ctl, f.hint ? h('small', {}, f.hint) : null));
+  }
+  const go = h('button', { class: 'btn primary', id: 'go', type: 'button', onclick: generate }, 'Generate draft');
+  box.append(h('div', { class: 'sticky' }, go, h('span', { class: 'kbd' }, 'Ctrl or Cmd + Enter'), h('button', { class: 'linkish', type: 'button', onclick: clearJob }, 'Clear job details')));
+}
+function clearJob() { for (const k of ['company', 'job_title', 'job_link', 'jd', 'company_info', 'person_info', 'recipient_name', 'recipient_email', 'person_name', 'person_role']) delete vals[k]; save(); renderInputs(); }
+
+/* ---------- generate ---------- */
+async function generate() {
+  if (busy) return; const m = MODES[mode];
+  const payload = {}; for (const id of m.fields) payload[id] = F[id].type === 'number' ? Number(vals[id] || 60) : (vals[id] || '');
+  if (mode === 'form' && !payload.questions.trim()) return toast('Paste at least one question.', true);
+  if (mode !== 'form' && !payload.jd.trim() && !payload.company.trim()) return toast('Add a company or paste the job description first.', true);
+  busy = true; const go = $('#go'); go.disabled = true; go.textContent = 'Drafting...';
+  const slow = setTimeout(() => { const o = $('#output'); if (!o.querySelector('.slow')) o.prepend(h('p', { class: 'slow' }, 'Groq is throttling the free tier. Retrying, this can take up to a minute.')); }, 8000);
+  try { results[mode] = { data: await api(m.endpoint, payload), payload }; renderOutput(); }
+  catch (e) { toast(e.message, true); }
+  finally { clearTimeout(slow); busy = false; go.disabled = false; go.textContent = 'Generate draft'; const s = $('#output .slow'); if (s) s.remove(); }
+}
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); generate(); } });
+
+/* ---------- output ---------- */
+const facts = d => h('dl', { class: 'facts' },
+  ...[['Model', d.meta.model], ['Prompt', fmt(d.meta.prompt_tokens) + ' tokens'], ['Reply', fmt(d.meta.completion_tokens) + ' tokens']]
+    .map(([k, v]) => h('div', {}, h('b', {}, k + ' '), v)));
+const paper = (value, onedit) => { const t = h('textarea', { class: 'paper', 'aria-label': 'Draft text' }); t.value = value; t.addEventListener('input', () => { autosize(t); onedit && onedit(t.value); }); requestAnimationFrame(() => autosize(t)); return t; };
+const letter = (...inner) => h('article', { class: 'letter' }, h('div', { class: 'stripe' }), ...inner, h('div', { class: 'stripe' }));
+
+function renderOutput() {
+  const o = $('#output'); o.replaceChildren(); const r = results[mode];
+  if (!r) {
+    o.append(h('div', { class: 'empty' }, h('h2', {}, 'Nothing drafted yet'),
+      h('p', {}, mode === 'form' ? 'Paste the form questions on the left and generate. Answers come from your full resume.' : 'Paste the job description on the left and generate. Your templates and the best-matching resume do the rest.')));
+    return;
+  }
+  ({ email: outEmail, linkedin: outLinkedIn, form: outForm, cover: outCover })[mode](r.data, r.payload, o);
+}
+
+function outEmail(d, p, o) {
+  const to = h('input', { id: 'o-to', type: 'email', placeholder: 'recipient@company.com', 'aria-label': 'To' }); to.value = vals.recipient_email || '';
+  const subj = h('input', { id: 'o-sub', 'aria-label': 'Subject' }); subj.value = d.subject;
+  const body = paper(d.body);
+  const sel = h('select', { 'aria-label': 'Attached resume' }, h('option', { value: '' }, 'No attachment'), ...meta.resumes.map(r => h('option', { value: r.key }, r.file)));
+  sel.value = d.resume_key;
+  const prev = h('a', { href: '#', target: '_blank', rel: 'noopener' }, 'Preview PDF'); const setPrev = () => { prev.style.display = sel.value ? '' : 'none'; prev.href = '/api/resume/' + sel.value; }; sel.onchange = setPrev; setPrev();
+  const g = meta.gmail;
+  const draftBtn = h('button', { class: 'btn primary', type: 'button' }, g.connected ? 'Create Gmail draft' : (g.configured ? 'Connect Gmail' : 'Set up Gmail'));
+  draftBtn.onclick = async () => {
+    if (!g.configured) return toast('Add credentials.json to the project folder first. See README step 3.', true);
+    if (!g.connected) return location.href = '/auth/google/login';
+    draftBtn.disabled = true; draftBtn.textContent = 'Saving draft...';
+    try { const r = await api('/api/gmail/draft', { to: to.value, subject: subj.value, body: body.value, resume_key: sel.value }); toast('Draft saved in Gmail.', false, { url: r.url, label: 'Open it' }); }
+    catch (e) { toast(e.message, true); } finally { draftBtn.disabled = false; draftBtn.textContent = 'Create Gmail draft'; }
+  };
+  o.append(letter(
+    h('div', { class: 'lbody' }, h('div', { class: 'row' }, h('label', { for: 'o-to' }, 'To'), to), h('div', { class: 'row' }, h('label', { for: 'o-sub' }, 'Subject'), subj), body,
+      h('div', { class: 'attach' }, 'Attached', sel, prev, h('span', {}, `Template: ${d.template}. Resume scores: ` + Object.entries(d.scores).map(([k, v]) => `${k} ${v}`).join(', ')))),
+    h('div', { class: 'actions' }, draftBtn, h('button', { class: 'btn', type: 'button', onclick: () => copy(`Subject: ${subj.value}\n\n${body.value}`) }, 'Copy'), h('button', { class: 'btn', type: 'button', onclick: generate }, 'Regenerate')),
+    facts(d)));
+}
+
+function outLinkedIn(d, p, o) {
+  const hard = d.limit <= 300;
+  const count = h('span', { class: 'count' }); const body = paper(d.message, () => upd());
+  const upd = () => { const n = body.value.length; count.textContent = hard ? `${n} / ${d.limit}` : `${n} characters`; count.className = 'count' + (hard && n > d.limit ? ' warn' : ''); }; upd();
+  o.append(letter(h('div', { class: 'lbody' }, d.note ? h('p', { class: 'note' }, d.note) : null, body),
+    h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'button', onclick: () => copy(body.value, 'Message copied') }, 'Copy message'), h('button', { class: 'btn', type: 'button', onclick: generate }, 'Regenerate'), count), facts(d)));
+}
+
+function outForm(d, p, o) {
+  const cards = d.answers.map(x => {
+    const ta = paper(x.a, () => upd()); const wc = h('span', {}); const badge = h('span', { class: 'badge' }, 'Needs your input');
+    const upd = () => { wc.textContent = words(ta.value) + ' words'; badge.style.display = /\[FILL/.test(ta.value) ? '' : 'none'; }; upd();
+    return { ta, node: h('div', { class: 'qa' }, h('p', { class: 'q' }, x.q), ta, h('div', { class: 'tools' }, wc, badge, h('button', { class: 'linkish', type: 'button', onclick: () => copy(ta.value, 'Answer copied') }, 'Copy'))) };
+  });
+  o.append(letter(...cards.map(c => c.node),
+    h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'button', onclick: () => copy(cards.map((c, i) => `${i + 1}. ${d.answers[i].q}\n${c.ta.value}`).join('\n\n'), 'All answers copied') }, 'Copy all'), h('button', { class: 'btn', type: 'button', onclick: generate }, 'Regenerate')), facts(d)));
+}
+
+function outCover(d, p, o) {
+  const body = paper(d.text);
+  o.append(letter(h('div', { class: 'lbody' }, body), h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'button', onclick: () => copy(body.value, 'Letter copied') }, 'Copy letter'), h('button', { class: 'btn', type: 'button', onclick: generate }, 'Regenerate')), facts(d)));
+}
+
+function renderAll() { renderRail(); renderInputs(); renderOutput(); }
+async function loadMeta() { meta = await api('/api/meta'); renderRail(); }
+
+(async () => {
+  try { await loadMeta(); renderAll(); }
+  catch (e) { $('#output').append(h('div', { class: 'empty' }, h('h2', {}, 'Cannot reach the server'), h('p', {}, e.message))); }
+  if (new URLSearchParams(location.search).get('gmail') === 'connected') { toast('Gmail connected.'); history.replaceState({}, '', '/'); }
+})();
+})();
+</script>
+</body>
+</html>
