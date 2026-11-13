@@ -1,53 +1,74 @@
-# Personal Drafter
+# Career-ops — Job Search Application
 
-Local app that drafts emails, LinkedIn messages, form answers and cover letters from your own templates and resumes, using Groq. Emails go into Gmail as drafts with the best-matching resume PDF attached. It never sends anything on its own.
+A personal job-search web application: job tracker, outreach tracker, AI job/outreach
+capture, and a Personal Drafter (emails, LinkedIn messages, form answers, cover letters)
+with Gmail integration.
 
-## Setup (10 minutes)
+Local-first app. Single `.env`, runs anywhere Node runs.
 
-1. Install: `pip install -r requirements.txt` (Python 3.10+)
-2. Groq key: copy `.env.example` to `.env`, paste your key from https://console.groq.com/keys
-3. Gmail (one time):
-   - Google Cloud Console: create a project, enable **Gmail API**
-   - OAuth consent screen: External, status Testing, add your own Gmail as a **test user**
-   - Credentials: Create OAuth client ID, type **Desktop app**, download the JSON, save it here as `credentials.json`
-4. Run: `python run.py`, then open http://localhost:8000 (use `localhost`, not `127.0.0.1`)
-5. Click **Connect** under Gmail in the left rail.
+## What's inside
 
-Permission requested is `gmail.compose` only. It cannot read your inbox. This app only creates drafts.
-While the Google app is in Testing, the Gmail login expires every 7 days. Click Connect again.
+- **Today** (`/`) — your action queue: interviews, assignments, follow-ups
+- **Job Tracker** (`/job-tracker`) — pipeline with status tabs
+- **Outreach** (`/outreach`) — contact table with follow-up tracking
+- **Add Job** (`/add-job`) — paste free text, Groq parses it into the tracker
+- **Analytics** (`/analytics`) — funnel and conversion metrics from your data
+- **Drafter** (`/drafter`) — email / LinkedIn / form answers / cover letter,
+  picks the best resume, creates Gmail drafts (needs `credentials.json` + OAuth)
 
-## Render deployment
+## Environment
 
-Create a Render Web Service from this repository:
+Copy `.env.example` to `.env` and fill it in:
 
-- Build command: `pip install -r requirements.txt`
-- Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- Add `GROQ_API_KEY`, `GROQ_MODELS`, and `DATA_DIR=Personal Drive` as environment variables.
-- Add `GOOGLE_REDIRECT_URI=https://YOUR-SERVICE.onrender.com/auth/google/callback`.
-- Add a Render secret file named `credentials.json` containing the Google OAuth client JSON.
-- Add the same callback URL under Google Cloud Console > Credentials > OAuth client > Authorized redirect URIs.
-
-Do not upload `.env`, `credentials.json`, or `token.json` to GitHub. Gmail tokens stored on Render's normal filesystem can be lost when the service restarts; use persistent storage if you need the connection to survive restarts.
-
-## Your files (Personal Drive/)
-
-| File | Used for |
+| Variable | Purpose |
 |---|---|
-| `Email/Email Template.txt` | 4 templates, chosen by "Writing to" |
-| `Linkedin/Linkedin Template.txt` | 5 stages, chosen by "Message type" |
-| `CV/CV TEMPLATE.txt` | Cover letter |
-| `Resumes/Resume combiined.txt` | Source of truth for facts. Edit this to change what the model knows |
-| `Resume_org/*_ai/ml/sde/fde.pdf` | Attachments. Name must end in `_<key>.pdf` |
+| `GROQ_API_KEY` | App's Groq key (assistant, Add Job, Outreach) |
+| `GROQ_MODEL` | Model for the app (default `openai/gpt-oss-120b`) |
+| `PD_GROQ_API_KEY` | **Personal Drafter's** separate Groq key |
+| `PD_MODELS` | Drafter models, tried in order |
+| `PD_GOOGLE_REDIRECT_URI` | Gmail OAuth callback; defaults to `<origin>/auth/google/callback` |
+| `CAREER_OPS_DATA_DIR` | Optional. Where `job-tracker.json` / `outreach-tracker.json` live. Default `./data` |
 
-Keep the `## Template N - title` and `## N. title` headings in the template files; the loader splits on them. The `{INPUT}/{OUTPUT}` notes are stripped before the model sees them. Your signature comes from `profile.json`, not from the model.
+Personal Drafter reads its own data folder at `./data/personal-drafter`
+(templates, combined resume, role-specific resume PDFs, `credentials.json`, `token.json`).
+Those files are yours — they are git-ignored by default except `personal-drafter`
+templates/resume files which **must** be present at deploy time (see below).
 
-## How it works
+## Run locally
 
-- Resume choice is keyword scoring on job title + JD. No LLM call, zero tokens. Override it in the Resume dropdown.
-- Email, LinkedIn, cover letter send a trimmed resume (~2k tokens): profile for the chosen role, all experience, skills, best-matching projects.
-- Form answers send the full resume (~4.4k tokens) because questions are open-ended.
-- Anything it cannot know (notice period, salary, relocation) comes back as `[FILL: needs your input]`.
+```bash
+npm ci
+npm run build
+npm start        # http://localhost:3000
+```
 
-## Groq free tier
+## Deploy on Render
 
-Tokens per minute (input + output) is the real limit, not the context window. Sample free-tier limits were about 8,000 tokens/min and 200,000 tokens/day per model when this was built; check console.groq.com for yours. The app retries short waits and falls through `GROQ_MODELS` in order. Limits are per model, so a second model adds headroom.
+1. Push this repo to GitHub (already wired to `space-rock-0/MyProject`).
+2. In Render: **New → Web Service**, connect the repo.
+   - **Runtime**: Node
+   - **Build command**: `npm ci && npm run build`
+   - **Start command**: `npm start`
+   - **Instance type**: Free works; data on free tier is ephemeral (lost on every redeploy) — upgrade to Starter + persistent disk if you want durable data.
+3. **Environment variables** (copy from `.env.example`, paste real values):
+   `GROQ_API_KEY`, `GROQ_MODEL`, `PD_GROQ_API_KEY`, `PD_MODELS`,
+   `PD_GOOGLE_REDIRECT_URI=https://<your-service>.onrender.com/auth/google/callback`
+4. **Secret Files** (Render dashboard → Secret Files):
+   - `credentials.json` — Google OAuth client (Gmail API, Desktop app or Web app)
+   - `token.json` — created automatically after first Gmail connect
+5. Deploy. Render sets `PORT`; `server.mjs` binds `0.0.0.0` in containers and allows only the service hostname plus loopback — callbacks land at `/auth/google/callback`.
+
+## Gmail one-time setup
+
+1. Google Cloud Console → create project → enable **Gmail API**
+2. OAuth consent screen → External → Testing → add your Gmail as test user
+3. Credentials → **OAuth client ID** → Web application
+   - Authorized redirect URIs: `https://<your-service>.onrender.com/auth/google/callback`
+4. Download client JSON → save as `credentials.json` into `data/personal-drafter/`
+5. In the app: Drafter → Connect Gmail → sign in. `token.json` is written into
+   `data/personal-drafter/`.
+
+## Notes
+
+- Free tier Gmail tokens from Testing-mode apps expire every 7 days — reconnect when asked.
+- Job tracker and outreach data are plain JSON files; back up `data/` regularly.

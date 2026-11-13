@@ -1,5 +1,22 @@
+node_modules/
+.next*
 .env
+.env*.local
+dist/
+out/
+*.tsbuildinfo
+.DS_Store
+.playwright-mcp/
+.claude/
+
+# User job-search data — persisted only on Render with a disk
+data/job-tracker.json
+data/outreach-tracker.json
+
+# Secrets — never commit
+data/personal-drafter/credentials.json
+data/personal-drafter/token.json
+
+# These exist at repo root for local development — never commit
 credentials.json
 token.json
-__pycache__/
-.venv/
