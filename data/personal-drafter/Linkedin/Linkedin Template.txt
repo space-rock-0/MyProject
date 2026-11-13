@@ -1,0 +1,55 @@
+# LinkedIn networking message templates
+
+## 1. Connection request
+
+Stage 1 · Before connecting
+
+Hi [Name], came across your profile while exploring opportunities at [Company]. I'm a recent CSE graduate interested in [relevant domain] and would love to connect and learn from your experience.
+
+Personalization: Mention their role, team, or relevant work if available. Keep it suitable for a connection note.
+
+## 2. First message after connecting
+
+Stage 2 · Start conversation
+
+Hi [Name], thanks for connecting! I noticed your experience in [specific area] at [Company]. I'm currently exploring opportunities in [AI/ML or Software Engineering] and have hands-on experience with [most relevant skills/project]. I'd love to learn about your experience and any advice you might have for someone starting out.
+
+Personalization: Establish a genuine connection. Don't ask for a referral immediately.
+
+## 3. Asking for a referral – specific job opening
+
+Stage 3A · Job identified
+
+Hi [Name], I came across an opening for [Job Title] at [Company] ([Job Link/Req ID]). My experience with [relevant technologies/project/experience] aligns closely with the role. Would you be comfortable referring me if you feel my profile is a good fit? Happy to share my resume. Thank you!
+
+Personalization: Match your strongest experience to the actual JD. Include the job link or requisition ID.
+
+## 4. Asking for general referral – no specific job identified
+
+Stage 3B · No specific opening
+
+Hi [Name], I'm currently exploring entry-level opportunities in [AI/ML / Software Engineering] at [Company]. Given my experience with [relevant skills and project/experience], I wanted to ask if there are any suitable openings where my profile might be a fit. I'd really appreciate your guidance or a referral if possible. Happy to share my resume!
+
+Personalization: Use this when you haven't identified a particular job but want to explore opportunities at their company.
+
+## 5. No current openings – future opportunities
+
+Stage 4 · Keep the connection active
+
+Thanks for letting me know, [Name]! I completely understand. I'd appreciate it if you could keep my profile in mind for any relevant opportunities that come up in the future. Happy to share my resume for reference. Thanks again for your time!
+
+Personalization: Be appreciative, don't pressure them, and leave the door open for future opportunities.
+
+
+
+{Input:
+
+- My resume: Use as the source of my qualifications, experience, projects and skills.
+- Employee information: Name, designation, team, experience and professional background.
+- LinkedIn information: Profile summary, posts, recent activity and shared interests. 
+- Company information: Products, technology, culture, recent developments and relevant opportunities.
+- Job description: Role requirements, responsibilities and job link/ID, if available.
+
+
+
+{Output: Return only the final message ready to copy and send.}

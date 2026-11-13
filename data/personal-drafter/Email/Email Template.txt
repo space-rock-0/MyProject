@@ -1,0 +1,76 @@
+
+# 1. Primary email templates
+
+## Template 1 — Job application to HR / Recruiter
+
+
+Hello [Name],
+
+I came across the [Job Title] opening at [Company Name] and wanted to express my interest in the opportunity.
+
+I'm a recent Computer Science graduate from VIT with internship experience at Accenture and Innodata, along with hands-on experience building [most relevant experience/project matching the JD]. My technical experience includes [3–4 relevant technologies or skills], which align closely with the requirements of this role.
+
+I'm particularly interested in [specific product, technology, or company-related reason]. I've attached my resume for your consideration and would appreciate it if you could review my profile or forward it to the relevant hiring team.
+
+Thank you for your time.
+
+Best regards,\
+**Sagi Siddhartha**\
+Hyderabad, India\
++91-9059168056\
+[sagi15sid05@gmail.com](mailto:sagi15sid05@gmail.com)\
+LinkedIn: [https://www.linkedin.com/in/siddhartha-sagi/](https://www.linkedin.com/in/siddhartha-sagi/)\
+GitHub: [https://github.com/space-rock-0](https://github.com/space-rock-0)
+{add suitable resume according jd single }
+
+## Template 2 — Direct email to an employee / Team member
+
+Hello [Name],
+
+I came across your profile while exploring the [Team/Department] at [Company Name]. I recently found an opening for [Job Title] ([Job Link]) that aligns with my background.
+
+I'm a recent CSE graduate from VIT with internship experience at Accenture and Innodata, and hands-on experience in [relevant project/technical area]. I was particularly interested in [specific work by employee/team or company].
+
+I wanted to reach out to learn more about the role and whether my profile could be a good fit. If you feel it aligns, I'd really appreciate your guidance or a referral.
+
+I've attached my resume for reference. Thank you for your time!
+
+Best regards,\
+**Sagi Siddhartha**\
+[Contact details]
+
+## Template 3 — Direct email to a Founder / CTO
+
+Hello [Name],
+
+I've been exploring [Company Name] and was particularly interested in [specific product, technology, or recent development].
+
+I'm a recent CSE graduate from VIT with internship experience at Accenture and Innodata. I've built end-to-end projects involving [most relevant technical area], including [one relevant project and its outcome].
+
+I'm interested in contributing to a team working on [company's product/domain] and wanted to ask whether there are any suitable entry-level opportunities where my background could be useful.
+
+I've attached my resume for your consideration. I'd appreciate any guidance on potential opportunities.
+
+Best regards,\
+**Sagi Siddhartha**\
+[Contact details]
+
+## Template 4 — No specific opening (general opportunity inquiry)
+
+Hello [Name],
+
+I'm a recent Computer Science graduate from VIT with internship experience at Accenture and Innodata. I'm currently exploring entry-level opportunities in [AI Engineering / Machine Learning / Software Engineering].
+
+My experience includes [2–3 relevant skills] and building [one relevant project or system]. I came across [Company Name] and was interested in the work your team is doing in [specific area].
+
+I wanted to check whether there are any current or upcoming opportunities that might align with my background. I've attached my resume for reference and would appreciate your guidance.
+
+Thank you for your time.
+
+Best regards,\
+**Sagi Siddhartha**\
+[Contact details]
+
+
+{ input: template+ resume(all 4 text)+ resume pdf{select best and keep 1 out of 4}
+{output: email draft send to gmail with coonect to gmail with pdf of resume }
