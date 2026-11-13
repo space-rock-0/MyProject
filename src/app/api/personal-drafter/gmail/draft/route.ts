@@ -64,9 +64,20 @@ export async function POST(req: Request) {
   if (!body.subject || !body.body) return Response.json({ error: "subject and body required" }, { status: 400 });
   const pdfs = resumePdfs() as Record<string, string>;
   const pdf = body.resume_key ? pdfs[String(body.resume_key).toLowerCase()] : undefined;
+  const to = (body.to || "").trim();
+  if (to) {
+    // Gmail rejects malformed To headers with a raw 400 — catch it here with a useful message.
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to);
+    if (!emailOk) {
+      return Response.json(
+        { error: `"${to}" is not a valid email address — use the full address, e.g. name@company.com` },
+        { status: 400 },
+      );
+    }
+  }
   try {
     const draft = await createDraft(
-      (body.to || "").trim(),
+      to,
       String(body.subject),
       String(body.body),
       pdf,
