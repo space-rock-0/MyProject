@@ -37,7 +37,11 @@ export function resumePdfs() {
 }
 
 export const COMBINED_RESUME = path.join(PD_DIR, "Resumes", "Resume combiined.txt");
-export const CRED = path.join(PD_DIR, "credentials.json");
+// Local checkout: credentials.json sits inside the data dir (gitignored there).
+// Render secret file: /etc/secrets/credentials.json. Prefer whichever exists.
+export const CRED = fs.existsSync(path.join(PD_DIR, "credentials.json"))
+  ? path.join(PD_DIR, "credentials.json")
+  : "/etc/secrets/credentials.json";
 export const TOKEN = path.join(PD_DIR, "token.json");
 export const GMAIL_REDIRECT =
   process.env.PD_GOOGLE_REDIRECT_URI || "http://localhost:3000/auth/google/callback";
