@@ -21,8 +21,16 @@ import {
 // from a chrome-extension:// origin, which Fetch Metadata always reports as
 // "cross-site", so every one of its requests is refused otherwise.
 export function proxy(req: NextRequest) {
+  // The OAuth handshake is a top-level navigation: Google sends the user's browser
+  // back to us, and the browser labels it cross-site. Same-origin/unset status means
+  // our own pages can load it; cross-site on exactly these two paths is the OAuth
+  // redirect, not an attack. Host filter still runs; every other route stays strict.
+  const isOAuthCallback =
+    req.method === "GET" &&
+    /^\/auth\/google\/(login|callback)$/.test(req.nextUrl.pathname);
+
   const decision = checkRequest({
-    secFetchSite: req.headers.get("sec-fetch-site"),
+    secFetchSite: isOAuthCallback ? "none" : req.headers.get("sec-fetch-site"),
     origin: req.headers.get("origin"),
     host: req.headers.get("host"),
     allowedHosts: parseAllowedHosts(process.env.CAREER_OPS_WEB_ALLOWED_HOSTS),
