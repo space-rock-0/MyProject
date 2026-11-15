@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import {
   checkRequest,
+  isDrafterDocumentNavigation,
   parseAllowedHosts,
   parseAllowedOrigins,
 } from "@/lib/origin-guard.mjs";
@@ -29,8 +30,15 @@ export function proxy(req: NextRequest) {
     req.method === "GET" &&
     /^\/auth\/google\/(login|callback)$/.test(req.nextUrl.pathname);
 
+  const isDrafterNavigation = isDrafterDocumentNavigation({
+    method: req.method,
+    pathname: req.nextUrl.pathname,
+    secFetchMode: req.headers.get("sec-fetch-mode"),
+    secFetchDest: req.headers.get("sec-fetch-dest"),
+  });
+
   const decision = checkRequest({
-    secFetchSite: isOAuthCallback ? "none" : req.headers.get("sec-fetch-site"),
+    secFetchSite: isOAuthCallback || isDrafterNavigation ? "none" : req.headers.get("sec-fetch-site"),
     origin: req.headers.get("origin"),
     host: req.headers.get("host"),
     allowedHosts: parseAllowedHosts(process.env.CAREER_OPS_WEB_ALLOWED_HOSTS),

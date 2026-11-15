@@ -121,6 +121,14 @@ function block(reason) {
   return { ok: false, status: 403, reason };
 }
 
+// The final Google OAuth redirect retains Sec-Fetch-Site: cross-site even
+// after our callback redirects to /drafter. Allow that document navigation;
+// background fetches, frames, API requests, and mutations still use the guard.
+export function isDrafterDocumentNavigation({ method, pathname, secFetchMode, secFetchDest }) {
+  return method === "GET" && pathname === "/drafter" &&
+    secFetchMode === "navigate" && secFetchDest === "document";
+}
+
 /**
  * Decide whether an /api request may proceed.
  * @param {object} req
