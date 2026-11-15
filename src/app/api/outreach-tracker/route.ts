@@ -1,3 +1,4 @@
+import { readTracker, writeTracker } from "@/lib/tracker-store.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { isISODate } from "@/lib/tracker-status.mjs";
@@ -27,24 +28,9 @@ export type OutreachRow = {
 // A missing file is not a malformed file: ENOENT means "nothing tracked yet"
 // and yields []. A file that exists but will not parse throws — the user's
 // data is surfaced as an error instead of being silently replaced.
-function readRows(): OutreachRow[] {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(DATA_FILE, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw err;
-  }
-  const parsed = JSON.parse(raw);
-  return Array.isArray(parsed) ? parsed : [];
-}
+function readRows() { return readTracker(DATA_FILE); }
 
-function writeRows(rows: OutreachRow[]) {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  const tmp = DATA_FILE + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(rows, null, 2), "utf8");
-  fs.renameSync(tmp, DATA_FILE);
-}
+function writeRows(rows: any[]) { return writeTracker(DATA_FILE, rows); }
 
 function corrupt(err: unknown) {
   console.error("[outreach-tracker] data file is unreadable:", err);
@@ -61,7 +47,7 @@ function checkFollowUp(v: unknown) {
 
 export async function GET() {
   try {
-    return Response.json(readRows());
+    return Response.json(await readRows());
   } catch (err) {
     return corrupt(err);
   }
@@ -73,18 +59,26 @@ export async function POST(req: Request) {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
   const b = body as Record<string, unknown>;
+  const allowed = new Set(["company","roles","careersPage","salary","loginDate","contactPerson","email","outreachChannel","response","phone","followUpDate"]);
+  for (const [key, value] of Object.entries(b)) {
+    if (key === "id" || key === "_revision") continue;
+    if (!allowed.has(key) || typeof value !== "string") return Response.json({ error: "Unknown field or invalid field type: " + key }, { status: 400 });
+    b[key] = value.trim();
+  }
+
   if (!b.company) {
     return Response.json({ error: "company required" }, { status: 400 });
   }
+  if (b.loginDate && (typeof b.loginDate !== "string" || !isISODate(b.loginDate))) return Response.json({ error: "loginDate must be YYYY-MM-DD" }, { status: 400 });
   const bad = checkFollowUp(b.followUpDate);
   if (bad) return bad;
   let rows: OutreachRow[];
   try {
-    rows = readRows();
+    rows = await readRows();
   } catch (err) {
     return corrupt(err);
   }
-  const nextId = rows.reduce((m, r) => Math.max(m, r.id), 0) + 1;
+  const nextId = Math.max(Date.now(), ...rows.map(r => r.id + 1));
   const row: OutreachRow = {
     id: nextId,
     company: String(b.company),
@@ -100,7 +94,7 @@ export async function POST(req: Request) {
     followUpDate: b.followUpDate ? String(b.followUpDate) : undefined,
   };
   rows.push(row);
-  writeRows(rows);
+  await writeRows(rows);
   return Response.json(row, { status: 201 });
 }
 
@@ -110,13 +104,21 @@ export async function PUT(req: Request) {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
   const b = body as Record<string, unknown>;
+  const allowed = new Set(["company","roles","careersPage","salary","loginDate","contactPerson","email","outreachChannel","response","phone","followUpDate"]);
+  for (const [key, value] of Object.entries(b)) {
+    if (key === "id" || key === "_revision") continue;
+    if (!allowed.has(key) || typeof value !== "string") return Response.json({ error: "Unknown field or invalid field type: " + key }, { status: 400 });
+    b[key] = value.trim();
+  }
+
   const id = Number(b.id);
-  if (!Number.isFinite(id)) return Response.json({ error: "id required" }, { status: 400 });
+  if (!Number.isSafeInteger(id) || id <= 0) return Response.json({ error: "id required" }, { status: 400 });
+  if (b.loginDate && (typeof b.loginDate !== "string" || !isISODate(b.loginDate))) return Response.json({ error: "loginDate must be YYYY-MM-DD" }, { status: 400 });
   const bad = checkFollowUp(b.followUpDate);
   if (bad) return bad;
   let rows: OutreachRow[];
   try {
-    rows = readRows();
+    rows = await readRows();
   } catch (err) {
     return corrupt(err);
   }
@@ -128,21 +130,22 @@ export async function PUT(req: Request) {
   }
   if (b.followUpDate === "") updated.followUpDate = undefined;
   rows[idx] = updated;
-  writeRows(rows);
+  await writeRows(rows);
   return Response.json(updated);
 }
 
 export async function DELETE(req: Request) {
   const url = new URL(req.url);
   const id = Number(url.searchParams.get("id"));
-  if (!Number.isFinite(id)) return Response.json({ error: "id required" }, { status: 400 });
+  if (!Number.isSafeInteger(id) || id <= 0) return Response.json({ error: "id required" }, { status: 400 });
   let rows: OutreachRow[];
   try {
-    rows = readRows();
+    rows = await readRows();
   } catch (err) {
     return corrupt(err);
   }
-  rows = rows.filter((r) => r.id !== id);
-  writeRows(rows);
+  if (!rows.some(r => r.id === id)) return Response.json({ error: "not found" }, { status: 404 });
+  rows.splice(rows.findIndex((r) => r.id === id), 1);
+  await writeRows(rows);
   return Response.json({ ok: true });
 }

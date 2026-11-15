@@ -27,23 +27,32 @@ export default function JobTrackerPage() {
   const [editing, setEditing] = useState<Row | null>(null);
   const [adding, setAdding] = useState(false);
 
+  async function request(url: string, options?: RequestInit) {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      window.alert(data.error || "Save failed. Your changes have not been confirmed; reload and retry.");
+      throw new Error(data.error || "Request failed");
+    }
+    return res;
+  }
   async function load() {
-    const res = await fetch("/api/job-tracker");
+    const res = await request("/api/job-tracker");
     setRows(await res.json());
   }
   useEffect(() => { load(); }, []);
 
   async function saveRow(row: Row) {
     if (row.id) {
-      await fetch("/api/job-tracker", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(row) });
+      await request("/api/job-tracker", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(row) });
     } else {
-      await fetch("/api/job-tracker", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(row) });
+      await request("/api/job-tracker", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(row) });
     }
     setEditing(null); setAdding(false); load();
   }
 
   async function del(id: number) {
-    await fetch(`/api/job-tracker?id=${id}`, { method: "DELETE" });
+    await request(`/api/job-tracker?id=${id}`, { method: "DELETE" });
     load();
   }
 
@@ -113,7 +122,7 @@ export default function JobTrackerPage() {
                 <td className="whitespace-nowrap px-4 py-3">
                   <select
                     value={r.status}
-                    onChange={async (e) => { const nr = { ...r, status: e.target.value }; await fetch("/api/job-tracker", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(nr) }); load(); }}
+                    onChange={async (e) => { const nr = { ...r, status: e.target.value }; await request("/api/job-tracker", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(nr) }); load(); }}
                     className="rounded-md border border-border bg-surface px-2 py-1 text-sm text-foreground"
                   >
                     {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}

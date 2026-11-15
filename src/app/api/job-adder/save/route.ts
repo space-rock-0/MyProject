@@ -1,3 +1,4 @@
+import { readTracker, writeTracker } from "@/lib/tracker-store.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { readJsonObject } from "@/lib/json-body";
@@ -24,24 +25,9 @@ type JobTrackerRow = {
 // A missing file is not a malformed file: ENOENT means "nothing tracked yet"
 // and yields []. A file that exists but will not parse throws — the caller
 // answers 500 instead of overwriting the user's tracker with a fresh file.
-function readRows(): JobTrackerRow[] {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(DATA_FILE, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw err;
-  }
-  const parsed = JSON.parse(raw);
-  return Array.isArray(parsed) ? parsed : [];
-}
+function readRows() { return readTracker(DATA_FILE); }
 
-function atomicWrite(rows: JobTrackerRow[]) {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  const tmp = DATA_FILE + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(rows, null, 2), "utf8");
-  fs.renameSync(tmp, DATA_FILE);
-}
+function atomicWrite(rows: any[]) { return writeTracker(DATA_FILE, rows); }
 
 function dedupeKey(r: { company: string; role: string; jobLink?: string }) {
   return `${r.jobLink || ""}|${r.company.toLowerCase()}|${r.role.toLowerCase()}`;
@@ -68,14 +54,14 @@ export async function POST(req: Request) {
 
   let rows: JobTrackerRow[];
   try {
-    rows = readRows();
+    rows = await readRows();
   } catch (err) {
     console.error("[job-adder/save] data file is unreadable:", err);
     return Response.json({ error: "job-tracker.json is corrupt or unreadable; refusing to overwrite it" }, { status: 500 });
   }
   const existingKeys = new Set(rows.map(dedupeKey));
   const saved: JobTrackerRow[] = [];
-  let nextId = rows.reduce((m, r) => Math.max(m, r.id), 0) + 1;
+  let nextId = Math.max(Date.now(), ...rows.map(r => r.id + 1));
   for (const r of valid) {
     const key = dedupeKey(r);
     if (existingKeys.has(key)) continue;
@@ -84,6 +70,6 @@ export async function POST(req: Request) {
     existingKeys.add(key);
     saved.push(row);
   }
-  atomicWrite(rows);
+  await atomicWrite(rows);
   return Response.json({ saved, skipped: valid.length - saved.length });
 }

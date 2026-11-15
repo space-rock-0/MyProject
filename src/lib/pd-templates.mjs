@@ -1,10 +1,9 @@
 // Reads the Email / LinkedIn / CV template .txt files. The {input}/{output}
 // notes inside them are for the user, not the model, and are stripped.
 import fs from "node:fs";
-import path from "node:path";
-import { PD_DIR } from "./pd-config.mjs";
+import { pdFile } from "./pd-config.mjs";
 
-const read = (p) => fs.readFileSync(p, "utf8").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+const read = (p) => fs.readFileSync(p, "utf8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 const stripMeta = (t) =>
   t
     .replace(/\{\s*input[\s\S]*$/im, "") // trailing {Input: ...}{Output: ...} block
@@ -13,18 +12,19 @@ const stripMeta = (t) =>
     .trim();
 
 export function emailTemplates() {
-  const t = stripMeta(read(path.join(PD_DIR, "Email", "Email Template.txt")));
+  const t = stripMeta(read(pdFile("01_Templates/Email_Templates.txt", "Email/Email Template.txt")));
   const parts = t.split(/^## Template (\d+)\s*[—–-]\s*(.+)$/m);
   const out = {};
   for (let i = 1; i < parts.length; i += 3) {
     const body = parts[i + 2].split(/Best regards,/i)[0].trim();
     out[parts[i]] = { id: parts[i], label: parts[i + 1].trim(), body };
   }
+  if (!Object.keys(out).length) throw new Error("No email templates found. Use headings such as ## Template 1 - Recruiter.");
   return out;
 }
 
 export function linkedinTemplates() {
-  const t = stripMeta(read(path.join(PD_DIR, "Linkedin", "Linkedin Template.txt")));
+  const t = stripMeta(read(pdFile("01_Templates/LinkedIn_Templates.txt", "Linkedin/Linkedin Template.txt")));
   const parts = t.split(/^## (\d+)\.\s*(.+)$/m);
   const out = {};
   for (let i = 1; i < parts.length; i += 3) {
@@ -37,14 +37,16 @@ export function linkedinTemplates() {
     const body = (stage ? lines.slice(1) : lines).join("\n").trim();
     out[parts[i]] = { id: parts[i], label: parts[i + 1].trim(), stage, body, guidance };
   }
+  if (!Object.keys(out).length) throw new Error("No LinkedIn templates found. Use headings such as ## 1. Connection request.");
   return out;
 }
 
 export function coverTemplate() {
-  const t = stripMeta(read(path.join(PD_DIR, "CV", "CV TEMPLATE.txt")));
+  const t = stripMeta(read(pdFile("01_Templates/Cover_Letter_Template.txt", "CV/CV TEMPLATE.txt")));
   const headerAndDate = t.split(/\[DATE\]/i);
   const header = headerAndDate[0].trim();
   const rest = headerAndDate[1] || "";
+  if (!rest) throw new Error("Cover letter template must contain [DATE].");
   const afterGreeting = rest.split(/Dear Hiring Manager,/i)[1] || rest;
   const body = afterGreeting.split(/Sincerely,/i)[0].trim();
   return { header, body };

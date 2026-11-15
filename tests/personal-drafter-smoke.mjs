@@ -1,0 +1,40 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+process.env.PD_GROQ_API_KEY = "test-key-no-network";
+const config = await import("../src/lib/pd-config.mjs");
+const templates = await import("../src/lib/pd-templates.mjs");
+const generation = await import("../src/lib/pd-generate.mjs");
+assert.ok(fs.existsSync(config.COMBINED_RESUME));
+assert.equal(Object.keys(config.resumePdfs()).length, 4);
+assert.equal(Object.keys(templates.emailTemplates()).length, 4);
+assert.equal(Object.keys(templates.linkedinTemplates()).length, 5);
+assert.ok(templates.coverTemplate().body.includes("applying"));
+assert.ok(!templates.emailTemplates()["1"].body.includes("Best regards"));
+assert.ok(!templates.coverTemplate().body.includes("{INPUT"));
+
+let replies = [];
+globalThis.fetch = async (_url, options) => {
+  const request = JSON.parse(options.body);
+  assert.ok(!request.messages[1].content.includes("undefined"));
+  return Response.json({ choices: [{ message: { content: replies.shift() } }], usage: {} });
+};
+const context = { company: "Example", job_title: "AI Engineer", jd: "LLM RAG agents", recipient_type: "recruiter" };
+replies = ["SUBJECT: Application\nBODY:\nHello team,\nThank you.\nBest regards,\nDuplicate name"];
+const email = await generation.makeEmail(context);
+assert.equal(email.resume_key, "ai");
+assert.equal(email.body.match(/Best regards/g).length, 1);
+assert.ok(email.body.includes(config.PROFILE.name));
+replies = ["Hi, I would like to connect."];
+assert.equal((await generation.makeLinkedin(context)).limit, 300);
+replies = ["x".repeat(310), "x".repeat(310)];
+await assert.rejects(generation.makeLinkedin(context), /exceeds/);
+replies = ["###1\nFirst answer\n###2\nSecond answer"];
+assert.equal((await generation.makeForm({ ...context, questions: "First?\n---\nSecond?" })).answers.length, 2);
+replies = ["Body paragraphs."];
+const cover = await generation.makeCover(context);
+assert.ok(cover.text.includes("Dear Hiring Manager,"));
+assert.ok(!cover.text.includes("undefined"));
+await assert.rejects(generation.makeEmail({ jd: {} }), /expected text/);
+await assert.rejects(generation.makeForm({ questions: "" }), /at least one/);
+console.log("Personal drafter: templates, 4 resumes, all generation modes, defaults and invalid input checks passed (mock provider).");

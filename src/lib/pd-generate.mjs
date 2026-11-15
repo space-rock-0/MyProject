@@ -17,6 +17,7 @@ const metaOf = (out, extra = {}) => ({
 });
 
 export async function makeEmail(r) {
+  r = validateInput(r);
   const available = Object.keys(resumePdfs());
   let key, scores;
   if (available.includes(r.resume)) {
@@ -27,7 +28,7 @@ export async function makeEmail(r) {
   }
   const templates = tpl.emailTemplates();
   const t = templates[RECIPIENT_TO_TEMPLATE[r.recipient_type || "recruiter"]] || templates["1"];
-  if (!t) throw new Error("Email template not found. Check data/personal-drafter/Email/Email Template.txt.");
+  if (!t) throw new Error("Email template not found. Check Personal Drive/01_Templates/Email_Templates.txt.");
   const resumeText = resumes.contextFor(key, `${r.job_title} ${r.jd} ${r.company_info}`, "smart");
   const ctx = prompts.ctxBlock(r, [
     ["recipient_name", "Recipient name"], ["company", "Company"], ["job_title", "Job title"], ["job_link", "Job link"],
@@ -56,6 +57,8 @@ export async function makeEmail(r) {
 }
 
 export async function makeLinkedin(r) {
+  r = validateInput(r);
+  r.stage = r.stage || "1";
   const templates = tpl.linkedinTemplates();
   const t = templates[r.stage || "1"];
   if (!t) throw new Error("Unknown LinkedIn stage.");
@@ -80,10 +83,12 @@ export async function makeLinkedin(r) {
     msg = fix.text.trim().replace(/^"+|"+$/g, "");
     note = "Shortened to fit LinkedIn's limit.";
   }
+  if (msg.length > limit) throw new Error("The message still exceeds LinkedIn's character limit. Please generate again.");
   return { message: msg, limit, note, meta: metaOf(out, { resume_key: key }) };
 }
 
 export async function makeForm(r) {
+  r = validateInput(r);
   const qs = (r.questions || "")
     .split(/\n\s*-{3,}\s*(?:\n|$)/g)
     .map((q) => q.trim())
@@ -106,6 +111,7 @@ export async function makeForm(r) {
 }
 
 export async function makeCover(r) {
+  r = validateInput(r);
   const template = tpl.coverTemplate();
   const [key] = resumes.choose(r.job_title, r.jd, Object.keys(resumePdfs()));
   const resumeText = resumes.contextFor(key, `${r.job_title} ${r.jd} ${r.company_info}`, "smart");
@@ -118,4 +124,20 @@ export async function makeCover(r) {
     `${template.header}\n\n${today}\n\n${r.company}\n${r.location || ""}\n\nDear Hiring Manager,\n\n${out.text.trim()}\n\nSincerely,\n${PROFILE.name}`
   );
   return { text: letter, meta: metaOf(out, { resume_key: key }) };
+}
+
+function validateInput(input) {
+  const out = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (key === "limit_words") {
+      if (!Number.isFinite(Number(value))) throw new Error("Words per answer must be a number.");
+      out[key] = Number(value);
+    } else {
+      if (typeof value !== "string") throw new Error(`Invalid ${key}: expected text.`);
+      if (value.length > 50000) throw new Error(`${key} is too long (maximum 50,000 characters).`);
+      out[key] = value.trim();
+    }
+  }
+  for (const key of ["job_title", "jd", "company", "company_info", "person_info", "domain"]) out[key] ??= "";
+  return out;
 }

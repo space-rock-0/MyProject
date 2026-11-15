@@ -1,3 +1,4 @@
+import { readTracker, writeTracker } from "@/lib/tracker-store.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { readJsonObject } from "@/lib/json-body";
@@ -12,31 +13,16 @@ const DATA_FILE = path.join(DATA_DIR, "outreach-tracker.json");
 // A missing file is not a malformed file: ENOENT means "nothing tracked yet"
 // and yields []. A file that exists but will not parse throws — the caller
 // answers 500 instead of overwriting the user's tracker with a fresh file.
-function readRows() {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(DATA_FILE, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw err;
-  }
-  const parsed = JSON.parse(raw);
-  return Array.isArray(parsed) ? parsed : [];
-}
+function readRows() { return readTracker(DATA_FILE); }
 
-function writeRows(rows: any[]) {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  const tmp = DATA_FILE + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(rows, null, 2), "utf8");
-  fs.renameSync(tmp, DATA_FILE);
-}
+function writeRows(rows: any[]) { return writeTracker(DATA_FILE, rows); }
 
 export async function POST(req: Request) {
   const body = await readJsonObject<{ rows?: unknown[] }>(req);
   if (!body || !Array.isArray(body.rows)) return Response.json({ error: "rows required" }, { status: 400 });
   let rows: any[];
   try {
-    rows = readRows();
+    rows = await readRows();
   } catch (err) {
     console.error("[outreach-adder/save] data file is unreadable:", err);
     return Response.json({ error: "outreach-tracker.json is corrupt or unreadable; refusing to overwrite it" }, { status: 500 });
@@ -44,6 +30,8 @@ export async function POST(req: Request) {
   let nextId = rows.reduce((m: number, r: any) => Math.max(m, r.id || 0), 0);
   const saved: any[] = [];
   let skipped = 0;
+  const keyOf = (r: any) => [r.company, r.roles, r.email, r.contactPerson, r.outreachChannel].map(v => String(v || "").trim().toLowerCase()).join("|");
+  const seen = new Set(rows.map(keyOf));
   for (const r of body.rows as any[]) {
     if (!r?.company) { skipped++; continue; }
     nextId += 1;
@@ -61,9 +49,12 @@ export async function POST(req: Request) {
       phone: r.phone ? String(r.phone) : undefined,
       followUpDate: r.followUpDate && isISODate(String(r.followUpDate)) ? String(r.followUpDate) : undefined,
     };
+    const key = keyOf(row);
+    if (seen.has(key)) { skipped++; continue; }
+    seen.add(key);
     rows.push(row);
     saved.push(row);
   }
-  writeRows(rows);
+  await writeRows(rows);
   return Response.json({ saved, skipped });
 }

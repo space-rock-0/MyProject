@@ -17,6 +17,13 @@ type Meta = {
 type Result = Record<string, unknown>;
 
 const LS = "pd.vals.v1";
+function savedValues(): Record<string, string> {
+  try {
+    const value = JSON.parse(localStorage.getItem(LS) || "{}");
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value).filter(([, v]) => typeof v === "string")) as Record<string, string> : {};
+  } catch { return {}; }
+}
 
 const MODES = {
   email: {
@@ -77,8 +84,10 @@ function Words({ text }: { text: string }) {
 
 export function Drafter() {
   const [meta, setMeta] = useState<Meta | null>(null);
-  const [mode, setMode] = useState<ModeKey>(() => (typeof window !== "undefined" && (localStorage.getItem("pd.mode") as ModeKey)) || "email");
-  const [vals, setVals] = useState<Record<string, string>>(() => (typeof window !== "undefined" ? JSON.parse(localStorage.getItem(LS) || "{}") : {}));
+  const [mode, setMode] = useState<ModeKey>("email");
+  const [vals, setVals] = useState<Record<string, string>>({});
+  const [restored, setRestored] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [results, setResults] = useState<Partial<Record<ModeKey, Result>>>({});
   const [to, setTo] = useState("");
   const [busy, setBusy] = useState(false);
@@ -92,37 +101,41 @@ export function Drafter() {
   }, []);
 
   const refreshMeta = useCallback(async () => {
-    const res = await fetch("/api/personal-drafter/meta");
-    setMeta(await res.json());
+    setLoadError("");
+    try {
+      const res = await fetch("/api/personal-drafter/meta", { signal: AbortSignal.timeout(20000) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not load drafter settings.");
+      setMeta(data);
+    } catch (error) { setLoadError(error instanceof Error ? error.message : "Could not load drafter settings."); }
   }, []);
 
   useEffect(() => { void refreshMeta(); }, [refreshMeta]);
-  useEffect(() => { localStorage.setItem(LS, JSON.stringify(vals)); }, [vals]);
-  useEffect(() => { localStorage.setItem("pd.mode", mode); }, [mode]);
+  useEffect(() => {
+    setVals(savedValues());
+    try { const saved = localStorage.getItem("pd.mode"); if (saved && Object.hasOwn(MODES, saved)) setMode(saved as ModeKey); } catch {}
+    setRestored(true);
+  }, []);
+  useEffect(() => { if (restored) try { localStorage.setItem(LS, JSON.stringify(vals)); localStorage.setItem("pd.mode", mode); } catch {} }, [vals, mode, restored]);
 
   const generate = useCallback(async () => {
     if (!meta || busy) return;
-    const m = MODES[mode];
-    const payload: Record<string, unknown> = {};
-    for (const id of m.fields) {
-      payload[id] = F[id].type === "number" ? Number(vals[id] || 60) : vals[id] || "";
-    }
-    if (mode === "form" && !String(payload.questions || "").trim()) return showToast("Paste at least one question.", true);
-    if (mode !== "form" && !String(payload.jd || "").trim() && !String(payload.company || "").trim())
-      return showToast("Add a company or paste the job description first.", true);
+    if (!vals.message?.trim()) return showToast("Paste your message first.", true);
     setBusy(true);
     setSlow(false);
     const timer = window.setTimeout(() => setSlow(true), 8000);
     try {
-      const res = await fetch(m.endpoint, {
+      const res = await fetch("/api/personal-drafter/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ message: vals.message, mode }),
       });
       const data = await res.json();
       if (!res.ok) { showToast(data.error || `Request failed (${res.status})`, true); return; }
-      setResults((prev) => ({ ...prev, [mode]: data as Result }));
-      if (mode === "email" && vals.recipient_email) setTo(vals.recipient_email);
+      setResults((prev) => ({ ...prev, [mode]: { ...data, jobContext: { ...data.extracted } } as Result }));
+      if (mode === "email") setTo(data.extracted?.recipient_email || "");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Drafting failed. Please retry.", true);
     } finally {
       window.clearTimeout(timer);
       setSlow(false);
@@ -139,15 +152,17 @@ export function Drafter() {
   }, [generate]);
 
   const clearJob = () => {
+    setResults({});
+    setTo("");
     setVals((prev) => {
       const next = { ...prev };
-      for (const k of ["company", "job_title", "job_link", "jd", "company_info", "person_info", "recipient_name", "recipient_email", "person_name", "person_role"]) delete next[k];
+      for (const k of ["company", "job_title", "job_link", "jd", "company_info", "person_info", "recipient_name", "recipient_email", "person_name", "person_role", "message"]) delete next[k];
       return next;
     });
   };
 
   const copy = async (text: string, label = "Copied") => {
-    try { await navigator.clipboard.writeText(text); } catch { /* clipboard blocked */ }
+    try { await navigator.clipboard.writeText(text); } catch { showToast("Copy failed. Select the text and copy it manually.", true); return; }
     showToast(label);
   };
 
@@ -155,7 +170,7 @@ export function Drafter() {
     return (
       <div className="drafter-root">
         <div className="inputs" style={{ gridColumn: "1 / -1", justifyContent: "center", alignItems: "center" }}>
-          Loading…
+          {loadError ? <><p role="alert">{loadError}</p><button className="btn" type="button" onClick={() => void refreshMeta()}>Retry</button></> : "Loading…"}
         </div>
       </div>
     );
@@ -201,29 +216,14 @@ export function Drafter() {
       <section className="inputs" aria-label="Inputs">
         <h1>{MODES[mode].title}</h1>
         <p className="hint">{MODES[mode].hint}</p>
-        {MODES[mode].fields.map((id) => {
-          const f = F[id];
-          const fid = `f-${id}`;
-          const val = vals[id] ?? (id === "limit_words" ? "60" : "");
-          const set = (v: string) => setVals((prev) => ({ ...prev, [id]: v }));
-          return (
-            <div className="field" key={id}>
-              <label htmlFor={fid}>{f.label}</label>
-              {f.type === "select" ? (
-                <select id={fid} value={val} onChange={(e) => set(e.target.value)}>
-                  {(f.opts ? f.opts(meta) : []).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
-              ) : f.type === "area" ? (
-                <textarea id={fid} rows={f.rows || 3} placeholder={f.ph || ""} value={val} onChange={(e) => set(e.target.value)} />
-              ) : (
-                <input id={fid} type={f.type || "text"} placeholder={f.ph || ""} autoComplete="off" value={val} onChange={(e) => set(e.target.value)} />
-              )}
-              {f.hint && <small>{f.hint}</small>}
-            </div>
-          );
-        })}
+        <label htmlFor="draft-message">Tell me what you need</label>
+        <textarea id="draft-message" rows={14} maxLength={30000} value={vals.message || ""} onChange={e => setVals(prev => ({ ...prev, message: e.target.value }))} placeholder="Write an email to Priya, a recruiter at Acme. Her email is priya@acme.com. I’m applying for AI Engineer. Here is the job description…
+
+Paste company notes, recipient details, questions and your instructions together." />
+        <p className="hint">I’ll extract the details and use your templates and resume. Review the draft before creating it in Gmail.</p>
+        {Boolean(results[mode]?.extracted) && <details><summary>Details understood from your message</summary><dl>{Object.entries(results[mode]!.extracted as Record<string, unknown>).filter(([, v]) => v !== "").map(([key, value]) => <div key={key}><dt>{key.replaceAll("_", " ")}</dt><dd>{String(value)}</dd></div>)}</dl></details>}
         <div className="sticky">
-          <button className="btn primary" type="button" disabled={busy} onClick={() => void generate()}>
+          <button className="btn primary" type="button" disabled={busy || !meta.has_key} onClick={() => void generate()}>
             {busy ? "Drafting..." : "Generate draft"}
           </button>
           <span className="kbd">Ctrl or Cmd + Enter</span>
@@ -233,8 +233,8 @@ export function Drafter() {
 
       {/* Output */}
       <main className="output" aria-live="polite">
-        {slow && <p className="slow">Groq is throttling the free tier. Retrying, this can take up to a minute.</p>}
-        {mode === "email" && <EmailOutput result={emailResult} meta={meta} vals={vals} to={to} setTo={setTo} showToast={showToast} copy={copy} />}
+        {slow && <p className="slow">Reading your message and preparing your draft…</p>}
+        {mode === "email" && <EmailOutput result={emailResult} meta={meta} vals={(results.email?.jobContext as Record<string, string>) || vals} to={to} setTo={setTo} showToast={showToast} copy={copy} />}
         {mode === "linkedin" && <LinkedInOutput result={linkedinResult} copy={copy} />}
         {mode === "form" && <FormOutput result={formResult} copy={copy} />}
         {mode === "cover" && <CoverOutput result={coverResult} copy={copy} />}
@@ -325,7 +325,7 @@ function EmailOutput({
       });
       const data = await res.json();
       if (!res.ok) return showToast(data.error || "Gmail draft failed", true);
-      showToast("Draft saved in Gmail and added to job tracker.", false, { url: data.url, label: "Open it" });
+      showToast(data.warning || "Draft saved in Gmail. Job tracked for review; mark it applied after sending.", Boolean(data.warning), { url: data.url, label: "Open it" });
     } catch {
       showToast("Gmail draft failed", true);
     } finally {

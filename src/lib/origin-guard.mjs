@@ -136,7 +136,8 @@ export function checkRequest({ secFetchSite, origin, host, allowedHosts, allowed
   // host. A direct client picks its own Host, so this cannot be what closes F2.
   const normalizedHost = normalizeHost(host);
   if (!normalizedHost) return block("missing Host header");
-  const hostAllowed = isLoopbackHost(normalizedHost) || (allowedHosts && allowedHosts.has(normalizedHost));
+  const hostAllowed = isLoopbackHost(normalizedHost) || (allowedHosts && allowedHosts.has(normalizedHost)) ||
+    (process.env.VERCEL === "1" && (normalizedHost.endsWith(".vercel.app") || normalizedHost.endsWith(".vercel.sh")));
   if (!hostAllowed) {
     return block(
       "this host is not allowed; the dashboard serves loopback only unless CAREER_OPS_WEB_ALLOWED_HOSTS opts it in",

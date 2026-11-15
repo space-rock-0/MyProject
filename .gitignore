@@ -1,22 +1,19 @@
-node_modules/
-.next*
-.env
-.env*.local
-dist/
-out/
+# career-ops web — self-contained ignore (does not touch core root .gitignore)
+/node_modules
+/.next*
+/out
+/dist
+/.turbo
 *.tsbuildinfo
+next-env.d.ts
+.env*.local
 .DS_Store
+
+# local QA artifacts (screenshots live in the workspace root, outside this tree)
 .playwright-mcp/
+
+# agent session memory — internal notes, never in the public repo
 .claude/
-
-# User job-search data — persisted only on Render with a disk
-data/job-tracker.json
-data/outreach-tracker.json
-
-# Secrets — never commit
-data/personal-drafter/credentials.json
-data/personal-drafter/token.json
-
-# These exist at repo root for local development — never commit
+/data
 credentials.json
 token.json

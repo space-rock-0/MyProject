@@ -1,4 +1,5 @@
 import { loginUrl } from "@/lib/pd-gmail.mjs";
+import { randomBytes } from "node:crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +20,11 @@ export async function GET(req: Request) {
   try {
     const origin = publicOrigin(req);
     const redirect = process.env.PD_GOOGLE_REDIRECT_URI || `${origin}/auth/google/callback`;
-    return Response.redirect(loginUrl(redirect), 302);
+    const state = randomBytes(32).toString("hex");
+    return new Response(null, { status: 302, headers: {
+      Location: loginUrl(redirect, state),
+      "Set-Cookie": `pd_oauth_state=${state}; HttpOnly; SameSite=Lax; Path=/auth/google; Max-Age=600${origin.startsWith("https:") ? "; Secure" : ""}`,
+    } });
   } catch (e) {
     return Response.json(
       { error: e instanceof Error ? e.message : "Gmail not configured" },

@@ -26,23 +26,32 @@ export default function OutreachPage() {
   const [editing, setEditing] = useState<Row | null>(null);
   const [adding, setAdding] = useState(false);
 
+  async function request(url: string, options?: RequestInit) {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      window.alert(data.error || "Save failed. Your changes have not been confirmed; reload and retry.");
+      throw new Error(data.error || "Request failed");
+    }
+    return res;
+  }
   async function load() {
-    const res = await fetch("/api/outreach-tracker");
+    const res = await request("/api/outreach-tracker");
     setRows(await res.json());
   }
   useEffect(() => { load(); }, []);
 
   async function saveRow(row: Row) {
     if (row.id) {
-      await fetch("/api/outreach-tracker", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(row) });
+      await request("/api/outreach-tracker", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(row) });
     } else {
-      await fetch("/api/outreach-tracker", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(row) });
+      await request("/api/outreach-tracker", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(row) });
     }
     setEditing(null); setAdding(false); load();
   }
 
   async function del(id: number) {
-    await fetch(`/api/outreach-tracker?id=${id}`, { method: "DELETE" });
+    await request(`/api/outreach-tracker?id=${id}`, { method: "DELETE" });
     load();
   }
 

@@ -6,6 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  try {
   const gmail = await status();
   const email = emailTemplates() as Record<string, { label: string }>;
   const linkedin = linkedinTemplates() as Record<string, { label: string; stage?: string }>;
@@ -21,4 +22,7 @@ export async function GET() {
     has_key: Boolean(PD_KEY),
     gmail,
   });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "Could not load drafter configuration." }, { status: 500 });
+  }
 }

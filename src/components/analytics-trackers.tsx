@@ -1,3 +1,5 @@
+import { readTracker } from "@/lib/tracker-store.mjs";
+import { DATA_DIR } from "@/lib/data-dir.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { BriefcaseBusiness, Mail, Send, Users, CalendarClock, ClipboardCheck, Phone, CircleCheck, XCircle } from "lucide-react";
@@ -6,24 +8,14 @@ import { Panel, MetricCard } from "@/components/analytics-view";
 type JobRow = { id: number; company: string; role: string; status: string; source?: string; date?: string; jobLink?: string; careerPage?: string; mail?: string };
 type OutreachRow = { id: number; company: string; roles?: string; outreachChannel?: string; response?: string; followUpDate?: string; email?: string; phone?: string; contactPerson?: string };
 
-function readJson(file: string): any[] {
-  try {
-    const base = process.env.CAREER_OPS_DATA_DIR ? path.resolve(process.env.CAREER_OPS_DATA_DIR) : path.join(process.cwd(), "data");
-    const p = path.join(base, file);
-    if (!fs.existsSync(p)) return [];
-    const parsed = JSON.parse(fs.readFileSync(p, "utf8"));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
+async function readJson(file: string) { return readTracker(path.join(DATA_DIR, file)); }
 
 const FUNNEL = ["APPLIED", "RESPONDED", "ASSESSMENT", "INTERVIEW", "OFFER"] as const;
 const TERMINAL_OK = "HIRED";
 
-export function TrackersView() {
-  const jobs: JobRow[] = readJson("job-tracker.json");
-  const outreach: OutreachRow[] = readJson("outreach-tracker.json");
+export async function TrackersView() {
+  const jobs: JobRow[] = await readJson("job-tracker.json");
+  const outreach: OutreachRow[] = await readJson("outreach-tracker.json");
 
   const n = jobs.length;
   const count = (s: string) => jobs.filter((j) => j.status === s).length;
@@ -46,7 +38,7 @@ export function TrackersView() {
   const channelEntries = Object.entries(countBy(outreach.map((o) => o.outreachChannel || "Unknown"))).sort((a, b) => b[1] - a[1]);
   const responseEntries = Object.entries(countBy(outreach.map((o) => o.response || "No response"))).sort((a, b) => b[1] - a[1]);
 
-  const followUps = outreach.filter((o) => o.followUpDate);
+  const followUps = outreach.filter((o) => o.followUpDate && o.followUpDate <= new Date().toLocaleDateString("en-CA"));
   const jobsWithMail = jobs.filter((j) => j.mail).length;
   const jobsWithCareerPage = jobs.filter((j) => j.careerPage).length;
 
@@ -60,7 +52,7 @@ export function TrackersView() {
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(300px,0.85fr)]">
-        <Panel eyebrow="Funnel" title="Job application funnel" description="Cumulative jobs that reached each stage. Each bar is out of everything tracked.">
+        <Panel eyebrow="Funnel" title="Job application funnel" description="Estimated from current statuses; historical stage transitions are not recorded. Rejected jobs cannot be assigned to their previous stage.">
           <div className="mt-5 space-y-3.5">
             <FunnelRow label="Applied" count={applied} total={n} tone="bg-sky-400" />
             <FunnelRow label="Responded" count={responded} total={n} tone="bg-cyan-400" />
@@ -81,7 +73,7 @@ export function TrackersView() {
             <RateTile label="Interview rate" value={interviewRate} />
             <RateTile label="Offer rate" value={offerRate} />
             <RateTile label="Hire rate" value={hireRate} />
-            <RateTile label="Outreach coverage" value={n ? (outreach.length / n) * 100 : 0} />
+            <RateTile label="Jobs at contacted companies" value={n ? (jobs.filter(j => outreach.some(o => o.company.trim().toLowerCase() === j.company.trim().toLowerCase())).length / n) * 100 : 0} />
           </div>
           <div className="mt-5 border-t border-border pt-4 text-xs text-muted">
             <span className="tabular-nums text-foreground">{jobsWithCareerPage}/{n}</span> jobs have a careers page · <span className="tabular-nums text-foreground">{jobsWithMail}/{n}</span> jobs have a contact mail

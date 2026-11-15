@@ -25,10 +25,11 @@ export async function complete(system, user, maxTokens = 600, temperature = 0.6)
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${PD_KEY}` },
           body: JSON.stringify(body),
+          signal: AbortSignal.timeout(30000),
         });
         if (res.status === 429 && attempt === 1) {
           const ra = parseFloat(res.headers.get("retry-after"));
-          if (Number.isFinite(ra) && ra <= 25) {
+          if (Number.isFinite(ra) && ra >= 0 && ra <= 3) {
             await new Promise((r) => setTimeout(r, (ra + 0.5) * 1000));
             continue;
           }
@@ -58,5 +59,5 @@ export async function complete(system, user, maxTokens = 600, temperature = 0.6)
       }
     }
   }
-  throw new LLMError(`All models failed (${errors.join("; ")}). Free tier: wait a minute and retry.`, 429);
+  throw new LLMError(`All models failed (${errors.join("; ")}). Please retry shortly.`, errors.some(e => e.includes("429")) ? 429 : 502);
 }

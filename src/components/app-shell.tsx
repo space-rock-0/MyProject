@@ -22,22 +22,7 @@ import { visibleNavItems, isActivePath } from "@/lib/nav-items";
 
 export function AppShell({ children, followupsEnabled }: { children: React.ReactNode; followupsEnabled: boolean }) {
   const pathname = usePathname();
-  // The drafter is a full-screen workspace with its own rail — don't show the app sidebar on top of it.
-  if (pathname === "/drafter") {
-    return (
-      <JobsProvider>
-        <PipelineProvider>
-          <ApplyProvider>
-            <ExploreProvider>
-              <main id="main-content" tabIndex={-1} className="min-h-screen overflow-x-hidden focus:outline-none">
-                {children}
-              </main>
-            </ExploreProvider>
-          </ApplyProvider>
-        </PipelineProvider>
-      </JobsProvider>
-    );
-  }
+
   return (
     <JobsProvider>
       <PipelineProvider>
