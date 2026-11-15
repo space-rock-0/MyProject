@@ -13,7 +13,7 @@ import { readJsonObject } from "@/lib/json-body";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 320;
+export const maxDuration = 300;
 
 // AI pre-fill (STREAMING NDJSON). The user's BYO CLI (read-only PLANNER — no
 // browser access) drafts an answer per field from cv.md / profile / the job's

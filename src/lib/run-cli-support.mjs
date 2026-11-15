@@ -429,19 +429,15 @@ export function newCompletedReportNum(beforeEntries, afterEntries) {
   return Number.isFinite(n) ? n : null;
 }
 
-// Graceful-SIGTERM budget (ms) for a run, kept safely under the route's 800s
-// maxDuration. pdf reserves headroom for its post-agent Chromium render.
-// evaluate reserves 60s for report-persist (write the report, merge the
-// tracker, release the sentinel), which runs after the agent. Other kinds
-// have no post-agent phase, so they keep nearly the whole budget. The old
-// 285s evaluate floor killed real evaluations mid-run — ~25 Bash calls plus web
-// searches routinely run longer — and the kill then misreported as "didn't save
-// a report" (#3124).
-export const RUN_MAX_DURATION_S = 800;
+// Graceful-SIGTERM budget (ms) for Vercel Hobby's 300s function limit. pdf
+// reserves 90s for Chromium rendering; evaluate reserves 60s for report
+// persistence; other kinds reserve 30s for response and cleanup. Longer jobs
+// need a background worker rather than a longer serverless request.
+export const RUN_MAX_DURATION_S = 300;
 export function killMsForKind(kind) {
-  if (kind === "pdf") return 600_000;
-  if (kind === "evaluate") return 740_000;
-  return 780_000;
+  if (kind === "pdf") return 210_000;
+  if (kind === "evaluate") return 240_000;
+  return 270_000;
 }
 
 /**

@@ -1,725 +1,159 @@
-// Both spawners are needed here, and the distinction matters: the agent CLI goes
-// through spawnHeadlessCli (which closes stdin so `codex exec` can't hang waiting
-// on it, #2085), while the PDF render is a plain Node child process with no CLI
-// sandbox in the way (#2172) and so passes `spawn` itself to renderAndMarkPdf.
-import { spawn } from "node:child_process";
-import fs from "node:fs";
-import path from "node:path";
-import { cliSubstitutionNotice, cliUnavailableError, resolveCliOrFallback } from "@/lib/clis";
-import { localISODate } from "@/lib/followups";
-import { accumulateTokens, createAgentTextJoiner, isFatalGenericStderr, killMsForKind, noOutputError, timeoutMessage } from "@/lib/run-cli-support.mjs";
-import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
-import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
-import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
-import { dataFolderMissingMessage } from "@/lib/core/data-root.mjs";
-import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
-import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
-import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
-import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
-import { persistEvaluation, evaluateRunOutcome, evaluationOutcomeEvent } from "@/lib/report-persist.mjs";
-import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
-import { isTruncatedJd, prefetchJd } from "@/lib/jd-prefetch.mjs";
-import { runCoreCli } from "@/lib/core-cli";
-import { parseCoverRequest } from "@/lib/cover-brief.mjs";
-import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
-import { fencingReport, isCliAllowedForCapabilities } from "@/lib/cli-fencing.mjs";
-import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
-import { resolveCvTemplate, resolveUserTemplatesDir } from "@/lib/core/cv-template.mjs";
-import { profileRef } from "@/lib/core/profile-path.mjs";
-import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
-import { createRunFinalizer } from "@/lib/run-finalizer.mjs";
-import { readJsonObject } from "@/lib/json-body";
-import { writeEvaluationInstructions } from "@/lib/evaluation-instructions-file.mjs";
-import { spillOversizedPrompt } from "@/lib/oversized-prompt.mjs";
-import { parseEvaluationOptions, selectedEvaluationInstructions } from "@/lib/evaluation-options.mjs";
+YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éí×nºñ:-jZ.¶›­–)Ş³Ròò&÷F‚7væW'2&RæVVFVB†W&RÂæBF†RF—7F–æ7F–öâÖGFW'3¢F†RvVçB4Ä’vöW0¢òòF‡&÷Vv‚7vä†VFÆW746Æ’‡v†–6‚6Æ÷6W27FF–â6ò6öFW‚W†V66âwB†ærv—F–æp¢òòöâ—BÂ3#ƒR’Âv†–ÆRF†RDb&VæFW"—2Æ–âæöFR6†–ÆB&ö6W72v—F‚æò4Ä¢òò6æF&÷‚–âF†Rv’‚3#s"’æB6ò76W27væ—G6VÆbFò&VæFW$æDÖ&µFbà¦–×÷'B²7vâÒg&öÒ&æöFS¦6†–ÆE÷&ö6W72#°¦–×÷'Bg2g&öÒ&æöFS¦g2#°¦–×÷'BF‚g&öÒ&æöFS§F‚#°¦–×÷'B²6Æ•7V'7F—GWF–öäæ÷F–6RÂ6Æ•Væf–Æ&ÆTW'&÷"Â&W6öÇfT6Æ”÷$fÆÆ&6²Òg&öÒ$öÆ–"ö6Æ—2#°¦–×÷'B²Æö6Ä•4ôFFRÒg&öÒ$öÆ–"öföÆÆ÷wW2#°¦–×÷'B²67V×VÆFUFö¶Vç2Â7&VFTvVçEFW‡D¦ö–æW"Â—4fFÄvVæW&–57FFW'"Â¶–ÆÄ×4f÷$¶–æBÂæô÷WGWDW'&÷"ÂF–ÖV÷WDÖW76vRÒg&öÒ$öÆ–"÷'VâÖ6Æ’×7W÷'BæÖ§2#°¦–×÷'B²7vä†VFÆW746Æ’Òg&öÒ$öÆ–"÷7vâÖ6Æ’æÖ§2#°¦–×÷'B²6&VW$÷5&ö÷BÂ&VDÖVÖ÷'’Âf–æE&W÷'Df–ÆRÂ&VD–æ&÷‚Â&VE66äFFW2Â&VDÆæwVvT6öæf–rÒg&öÒ$öÆ–"ö6&VW"Ö÷2#°¦–×÷'B²&W6öÇfT6öFU&ö÷BÒg&öÒ$öÆ–"ö6÷&Rö6öFR×&ö÷BæÖ§2#°¦–×÷'B²FFföÆFW$Ö—76–ætÖW76vRÒg&öÒ$öÆ–"ö6÷&RöFF×&ö÷BæÖ§2#°¦–×÷'B²&W6öÇfUFeF‡2ÂG—RFeF‡2Òg&öÒ$öÆ–"÷Fb×F‡2æÖ§2#°¦–×÷'B²&VæFW$æDÖ&µFbÂw&—FT7d‡FÖÂÂFe'Vä÷WF6öÖRÒg&öÒ$öÆ–"÷Fb×&VæFW"æÖ§2#°¦–×÷'B²7&VFT7dVçfVÆ÷Tf–ÇFW"ÂG—R7dVçfVÆ÷RÒg&öÒ$öÆ–"ö7bÖVçfVÆ÷RæÖ§2#°¦–×÷'B²7&VFU&W÷'DVçfVÆ÷Tf–ÇFW"Òg&öÒ$öÆ–"÷&W÷'BÖVçfVÆ÷RæÖ§2#°¦–×÷'B²W'6—7DWfÇVF–öâÂWfÇVFU'Vä÷WF6öÖRÂWfÇVF–öä÷WF6öÖTWfVçBÒg&öÒ$öÆ–"÷&W÷'B×W'6—7BæÖ§2#°¦–×÷'B²'V–ÆE&ö×BÂ—56†VÆÅ6fT6ö×ç”æÖRÒg&öÒ$öÆ–"÷'Vâ×&ö×G2æÖ§2#°¦–×÷'B²—5G'Væ6FVD¦BÂ&VfWF6„¦BÒg&öÒ$öÆ–"ö¦B×&VfWF6‚æÖ§2#°¦–×÷'B²'Vä6÷&T6Æ’Òg&öÒ$öÆ–"ö6÷&RÖ6Æ’#°¦–×÷'B²'6T6÷fW%&WVW7BÒg&öÒ$öÆ–"ö6÷fW"Ö'&–VbæÖ§2#°¦–×÷'B²6&–Æ—F–W4f÷"Òg&öÒ$öÆ–"÷v÷&¶W"Ö6&–Æ—F–W2æÖ§2#°¦–×÷'B²fVæ6–æu&W÷'BÂ—46Æ”ÆÆ÷vVDf÷$6&–Æ—F–W2Òg&öÒ$öÆ–"ö6Æ’ÖfVæ6–æræÖ§2#°¦–×÷'B²6ÆVFT6Æ”&w2Òg&öÒ$öÆ–"ö6ÆVFRÖ–çfö6F–öâæÖ§2#°¦–×÷'B²&W6öÇfT7eFV×ÆFRÂ&W6öÇfUW6W%FV×ÆFW4F—"Òg&öÒ$öÆ–"ö6÷&Rö7b×FV×ÆFRæÖ§2#°¦–×÷'B²&öf–ÆU&VbÒg&öÒ$öÆ–"ö6÷&R÷&öf–ÆR×F‚æÖ§2#°¦–×÷'B²7V—&UG&6¶W%w&—FRÂ&VÆV6UG&6¶W%w&—FRÒg&öÒ$öÆ–"ö6÷&R÷'Vâ×&Vv—7G'’#°¦–×÷'B²7&VFU'Väf–æÆ—¦W"Òg&öÒ$öÆ–"÷'VâÖf–æÆ—¦W"æÖ§2#°¦–×÷'B²&VD§6öäö&¦V7BÒg&öÒ$öÆ–"ö§6öâÖ&öG’#°¦–×÷'B²w&—FTWfÇVF–öä–ç7G'V7F–öç2Òg&öÒ$öÆ–"öWfÇVF–öâÖ–ç7G'V7F–öç2Öf–ÆRæÖ§2#°¦–×÷'B²7–ÆÄ÷fW'6—¦VE&ö×BÒg&öÒ$öÆ–"ö÷fW'6—¦VB×&ö×BæÖ§2#°¦–×÷'B²'6TWfÇVF–öä÷F–öç2Â6VÆV7FVDWfÇVF–öä–ç7G'V7F–öç2Òg&öÒ$öÆ–"öWfÇVF–öâÖ÷F–öç2æÖ§2#° ¦W‡÷'B6öç7B'VçF–ÖRÒ&æöFV§2#°¦W‡÷'B6öç7BG–æÖ–2Ò&f÷&6RÖG–æÖ–2#°¦W‡÷'B6öç7BÖ„GW&F–öâÒ3²òòfW&6VÂ†ö&'’w2Ö†–×VÓ²Æöær4Ä’¦ö'2æVVB&6¶w&÷VæBv÷&¶W"à ¦W‡÷'B7–æ2gVæ7F–öâõ5B‡&W¢&WVW7B’°¢6öç7B&öG’Òv—B&VD§6öäö&¦V7CÇ²¶–æCó¢7G&–æs²–çWCó¢7G&–æs²6Æ”–Có¢7G&–æs²'&–Vcó¢Væ¶æ÷vã²WfÇVF–öå6V7F–öç3ó¢Væ¶æ÷vâÓâ‡&W“°¢–b‚&öG’’&WGW&âæWr&W7öç6R„¥4ôâç7G&–æv–g’‡²W'&÷#¢&&B§6öâ"Ò’Â²7FGW3¢CÒ“°¢6öç7B²¶–æBÒ&WfÇVFR"Â–çWBÂ6Æ”–C¢&WVW7FVD6Æ”–BÂ'&–VbÒÒ&öG“°¢6öç7BWfÇVF–öâÒ¶–æBÓÓÒ&WfÇVFR"ò'6TWfÇVF–öä÷F–öç2†&öG’æWfÇVF–öå6V7F–öç2’¢VæFVf–æVC°¢–b†WfÇVF–öâbbWfÇVF–öâæö²’&WGW&â&W7öç6Ræ§6öâ‡²W'&÷#¢WfÇVF–öâæW'&÷"ÒÂ²7FGW3¢CÒ“°¢–b‚–çWBÇÂ&WVW7FVD6Æ”–B’°¢&WGW&âæWr&W7öç6R„¥4ôâç7G&–æv–g’‡²W'&÷#¢&–çWBæB6Æ”–B&WV—&VB"Ò’Â²7FGW3¢CÒ“°¢Ğ¢6öç7BW6W$FFÒ6&VW$÷5&ö÷B‚“°¢–b‚g2æW†—7G57–æ2‡W6W$FF’’°¢&WGW&âæWr&W7öç6R„¥4ôâç7G&–æv–g’‡²W'&÷#¢FFföÆFW$Ö—76–ætÖW76vR‡W6W$FF’Ò’Â°¢7FGW3¢CÀ¢†VFW'3¢²$6öçFVçBÕG—R#¢&Æ–6F–öâö§6öâ"ÒÀ¢Ò“°¢Ğ¢6öç7B&W6öÇfVBÒ&W6öÇfT6Æ”÷$fÆÆ&6²‡&WVW7FVD6Æ”–B“°¢–b‚&W6öÇfVB’°¢&WGW&âæWr&W7öç6R„¥4ôâç7G&–æv–g’†6Æ•Væf–Æ&ÆTW'&÷"‡&WVW7FVD6Æ”–B’’Â°¢7FGW3¢CBÀ¢†VFW'3¢²$6öçFVçBÕG—R#¢&Æ–6F–öâö§6öâ"ÒÀ¢Ò“°¢Ğ¢6öç7B²7V2Â&–åF‚ÒÒ&W6öÇfVC°¢òòF†R4Ä’7GVÆÇ’'Vææ–æs¢fVæ6–ærÂ6&–Æ—F–W2æB&wb&VÆ÷r&R¶W–VBöâ—Bà¢6öç7B6Æ”–BÒ7V2æ–C°¢6öç7B7V'7F—GWF–öâÒ6Æ•7V'7F—GWF–öäæ÷F–6R‡&W6öÇfVB“°¢6öç7B6&–Æ—F–W2Ò6&–Æ—F–W4f÷"†¶–æB“°¢–b‚—46Æ”ÆÆ÷vVDf÷$6&–Æ—F–W2†6Æ”–BÂ6&–Æ—F–W2’’°¢&WGW&âæWr&W7öç6R€¢¥4ôâç7G&–æv–g’‡²W'&÷#¢4Ä’rG¶6Æ”–GÒr6ææ÷B'Vâw&—FRÖ6&ÆRv÷&¶W"rG¶¶–æGÒrv—F†÷WBfW&–f–VBW&Ö—76–öâFFW"æÒ’À¢²7FGW3¢CÂ†VFW'3¢²$6öçFVçBÕG—R#¢&Æ–6F–öâö§6öâ"ÒÒÀ¢“°¢Ğ ¢òòF†W6R'VâF†R$TÂ6÷&R†ÖöFW2÷67&—G2’Âæ÷B§W7BFF(	Bf–Â6ÆV&Ç’–bF†P¢òò&ö÷B—2–æ6ö×ÆWFR–ç7FVBöbf¶–ær—Bà¢òòF†R&V6öæF—F–öâ×W7B6†V6²F†Rf–ÆRF†R&ö×Bv–ÆÂ7GVÆÇ’&VBâ–ææ–æp¢òò—BFòÖöFW2ööfW'FæÖBÖVçB6öæf–wW&VBÖ&¶WB76VB6†V6²öâf–ÆRF†P¢òò'VâæWfW"÷Vç2ÂæBv÷VÆB†fRÖ—76VBÖ&¶WBF—"v—F‚æòWfÇVF–öâÖöFRà¢6öç7BÆærÒ&VDÆæwVvT6öæf–r‚“°¢6öç7BæVVG567&—C¢&V6÷&CÇ7G&–ærÂ7G&–æsâÒ²WfÇVFS¢ÆæræWfÄÖöFTf–ÆRÂ&f—‚×÷'FÂ#¢'fW&–g’×÷'FÇ2æÖ§2"ÂFc¢&vVæW&FR×FbæÖ§2"Â6÷fW#¢&ÖöFW2ö6÷fW"æÖB"Ó°¢6öç7B&WV—&VBÒæVVG567&—E¶¶–æEÓ°¢òò67&—G2æB7—7FVÒÖöFW2Æ—fR–âF†R6öFR6†V6¶÷WBÂv†–6‚öâ7Æ—BÖÆ–÷W@¢òò–ç7FÆÂ—2æ÷BF†RFF&ö÷B†7bæÖBÂ&W÷'G2òæB÷WGWB7F’VæFW"F†B’à¢6öç7B6öFU&ö÷BÒ&W6öÇfT6öFU&ö÷B‡&ö6W72æ7vB‚’Â&ö6W72æVçb“°¢òò4$TU%ôõ5õ$ôõB—2'VçF–ÖRW6W"FFÂæ÷B'V–ÆB–çWBâG&6–ærF†—0¢òòG–æÖ–2F‚v÷VÆB6÷’F†Rv†öÆRvV"&ö¦V7B–çFòWfW'’6W'fW"'VæFÆRà¢6öç7B&WV—&VEF‚Ò&WV—&V@¢òF‚æ¦ö–â‚ò¢GW&&÷6´–væ÷&S¢G'VR¢ò6öFU&ö÷BÂ&WV—&VB¢¢"#°¢–b‡&WV—&VBbbg2æW†—7G57–æ2‚ò¢GW&&÷6´–væ÷&S¢G'VR¢ò&WV—&VEF‚’’°¢&WGW&âæWr&W7öç6R€¢¥4ôâç7G&–æv–g’‡°¢W'&÷#¢F†—2æVVG26ö×ÆWFR6&VW"Ö÷26†V6¶÷WB‚G·&WV—&VGÒ’âF†R6&VW"Ö÷26öFR6†V6¶÷WB—2–æ6ö×ÆWFR(	Bö–çB4$TU%ôõ5ô4ôDUõ$ôõBBgVÆÂ6†V6¶÷WBæÀ¢Ò’À¢²7FGW3¢CÂ†VFW'3¢²$6öçFVçBÕG—R#¢&Æ–6F–öâö§6öâ"ÒÒÀ¢“°¢Ğ ¢òò76VÖ&ÆR6VÆV7FVB6æöæ–6Â–ç7G'V7F–öç2&Vf÷&Rç’W‡G&7F–öâ÷"ÖöFVÂ6ÆÂà¢òòöÖ—GFVBv÷&²æWfW"&V6öÖW2'BöbF†Rv÷&¶W"w2WfÇVF–öâ–ç7G'V7F–öç2à¢ÆWBWfÇVF–öä–ç7G'V7F–öç3¢7G&–ærÂçVÆÂÒçVÆÃ°¢–b†WfÇVF–öãòæö²bbWfÇVF–öâægVÆÂ’°¢G'’°¢òòÖöFW2òæB&F6‚ò&R7—7FVÒf–ÆW3¢F†W’Æ—fR–âF†R6öFR6†V6¶÷WBà¢6öç7B&ö÷BÒ6öFU&ö÷C°¢WfÇVF–öä–ç7G'V7F–öç2Ò6VÆV7FVDWfÇVF–öä–ç7G'V7F–öç2‡°¢ÖöFS¢g2ç&VDf–ÆU7–æ2‚ò¢GW&&÷6´–væ÷&S¢G'VR¢ò&WV—&VEF‚Â'WFc‚"’À¢6æöæ–6ÄÖöFS¢g2ç&VDf–ÆU7–æ2‚ò¢GW&&÷6´–væ÷&S¢G'VR¢òF‚æ¦ö–â‡&ö÷BÂ&ÖöFW2ööfW'FæÖB"’Â'WFc‚"’À¢6†&VC¢g2ç&VDf–ÆU7–æ2‚ò¢GW&&÷6´–væ÷&S¢G'VR¢òF‚æ¦ö–â‡&ö÷BÂ&ÖöFW2õ÷6†&VBæÖB"’Â'WFc‚"’À¢&F6ƒ¢g2ç&VDf–ÆU7–æ2‚ò¢GW&&÷6´–væ÷&S¢G'VR¢òF‚æ¦ö–â‡&ö÷BÂ&&F6‚ö&F6‚×&ö×BæÖB"’Â'WFc‚"’À¢6V7F–öç3¢WfÇVF–öâç6V7F–öç2À¢Ò“°¢Ò6F6‚†W'&÷"’°¢6öç6öÆRæW'&÷"‚%¶6&VW"Ö÷5Òf–ÆVBFòÆöBfö7W6VBWfÇVF–öâ–ç7G'V7F–öç3¢"ÂW'&÷"“°¢&WGW&â&W7öç6Ræ§6öâ‡²W'&÷#¢$6÷VÆBæ÷BÆöBF†R6VÆV7FVBWfÇVF–öâ–ç7G'V7F–öç2âæò’'Vâv27F'FVBâ"ÒÂ²7FGW3¢C#"Ò“°¢Ğ¢Ğ ¢òòf—‚×÷'FÂw2&ö×BWG2F†—27G&–v‡B–çFò6†VÆÂ6öÖÖæBF†RvVçB'Vç2Âæ@¢òò6ö×ç’æÖR6â'&—fRg&öÒV&Æ–2E2Æ—7F–ær&F†W"F†âF†RW6W"w2÷và¢òòG—–ærâ&VgW6R&F†W"F†â6æ—F—¦S¢6–ÆVçFÇ’&Ww&—GFVâæÖRv÷VÆB&W—"F†P¢òòw&öær÷'FÂà¢–b†¶–æBÓÓÒ&f—‚×÷'FÂ"bb—56†VÆÅ6fT6ö×ç”æÖR†–çWB’’°¢&WGW&âæWr&W7öç6R€¢¥4ôâç7G&–æv–g’‡²W'&÷#¢%F†B6ö×ç’æÖR†26†&7FW'2’6âwB6fVÇ’72FòF†R÷'FÂ6†V6¶W"(	B&VæÖR—B–â÷'FÇ2ç–ÖÂf—'7Bâ"Ò’À¢²7FGW3¢CÂ†VFW'3¢²$6öçFVçBÕG—R#¢&Æ–6F–öâö§6öâ"ÒÒÀ¢“°¢Ğ ¢òòâ(	4b66÷&R—2ÖVæ–ævÆW72v—F†÷WB5bFò66÷&Rv–ç7B(	BF†R4Ä’v÷VÆ@¢òò†ÆÇV6–æFRf—Bæ'&F—fRæB7F–ÆÂVÖ—BdU$D”5Bâ&WV—&R7bæÖBf—'7Bà¢–b‚†¶–æBÓÓÒ&WfÇVFR"ÇÂ¶–æBÓÓÒ'Fb"ÇÂ¶–æBÓÓÒ&6÷fW""’bbg2æW†—7G57–æ2‡F‚æ¦ö–â†6&VW$÷5&ö÷B‚’Â&7bæÖB"’’’°¢&WGW&âæWr&W7öç6R€¢¥4ôâç7G&–æv–g’‡²W'&÷#¢$FB–÷W"5bf—'7B6ò’6â66÷&RF†—2v–ç7B–÷R(	BG&÷—BöâF†R†öÖRvRâ"Ò’À¢²7FGW3¢CÂ†VFW'3¢²$6öçFVçBÕG—R#¢&Æ–6F–öâö§6öâ"ÒÒÀ¢“°¢Ğ ¢6öç7BFöF’ÒÆö6Ä•4ôFFR‚“° ¢òò&V6ö×WFRFWFW&Ö–æ—7F–267&F6‚²f–æÂF‡26òF†RvVçBæWfW"6†ö÷6W0¢òò—G2÷vâf–ÆVæÖW2(	BF†R&6¶VæB÷vç2æÖ–ærÂw&—F–ær‚3#ƒR’æB&VæFW&–æp¢òò‚3#s"’âæ÷F†–ær—26ÆV&VBf—'7C¢w&—FT7d‡FÖÂ&Ww&—FW2F†R…DÔÀ¢òòg&öÒF†—2'Vâw2g&W6†Ç’'6VBVçfVÆ÷R&Vf÷&Rç’&VæFW"ÂæBF†RvVçB—0¢òòæòÆöævW"FöÆBF†W6RF‡2Â6ò7FÆRf–ÆR6ææ÷B7W'f—fR–çFò&VæFW"à¢ÆWBFeF‡3¢FeF‡2ÂVæFVf–æVC°¢–b†¶–æBÓÓÒ'Fb"’°¢6öç7BF‡5&W7VÇBÒ&W6öÇfUFeF‡2†–çWBÂFöF’Â6&VW$÷5&ö÷B‚’Âf–æE&W÷'Df–ÆR“°¢–b‚F‡5&W7VÇBæö²’°¢&WGW&âæWr&W7öç6R„¥4ôâç7G&–æv–g’‡²W'&÷#¢F‡5&W7VÇBæW'&÷"Ò’Â°¢7FGW3¢CÀ¢†VFW'3¢²$6öçFVçBÕG—R#¢&Æ–6F–öâö§6öâ"ÒÀ¢Ò“°¢Ğ¢FeF‡2ÒF‡5&W7VÇBçF‡3°¢Ğ ¢6öç7B6÷fW%&WVW7BÒ¶–æBÓÓÒ&6÷fW""ò'6T6÷fW%&WVW7B‡²–çWBÂ'&–VbÂ&ö÷C¢6&VW$÷5&ö÷B‚’Âf–æE&W÷'Df–ÆRÒ’¢VæFVf–æVC°¢–b†6÷fW%&WVW7Bbb6÷fW%&WVW7Bæö²’°¢&WGW&âæWr&W7öç6R„¥4ôâç7G&–æv–g’‡²W'&÷#¢6÷fW%&WVW7BæW'&÷"Ò’Â°¢7FGW3¢CÀ¢†VFW'3¢²$6öçFVçBÕG—R#¢&Æ–6F–öâö§6öâ"ÒÀ¢Ò“°¢Ğ ¢òò&W6öÇfRF†R÷7F–ærFFR„U$R&F†W"F†â6¶–ærF†RvVçBf÷"—BâF†P¢òò66ææW"Ç&VG’w&÷FR—Bg&öÒF†R&÷f–FW"w2÷vâöffW"ç÷7FVDFÂ6òF†—0¢òò6÷–W2&V6÷&FVBfÇVR–ç7FVBöb–çf—F–ærwVW72(	BæBÖöFW2ööfW'FæÖB—0¢òòW‡Æ–6—BF†BwVW76VBFFR—2v÷'6RF†ââ'6VçBöæR‡F†Rõ5DTB6öÇVÖà¢òò&VæFW'2'6VçB2(	FÂw&öærFFR2g&W6‚&W’âVæ¶æ÷vâU$Â(i"VæFVf–æV@¢òò(i"&W÷'B×W'6—7Bw&—FW2æò6VvÖVçBBÆÂà¢6öç7B÷7FVDBĞ¢¶–æBÓÓÒ&WfÇVFR ¢ò&VD–æ&÷‚‚’æf–æB‚†¢’Óâ¢çW&ÂÓÓÒ–çWB“òç÷7FVDBóò&VE66äFFW2‚’ævWB†–çWB¢¢VæFVf–æVC°¢òòv†–6‚5bFV×ÆFRF†Rv÷&¶W"f–ÆÇ2â&W6öÇfVB„U$RÂf÷"F†R6ÖR&V6öâÆæv ¢òò—3¢F†Rv÷&¶W"†2æò&6‚‚3#s"’Â6ò—B6ææ÷B'Vâ7b×FV×ÆFW2æÖ§2æBF†P¢òò&ö×BW6VBFòæÖRF†R&6RFV×ÆFR÷WG&–v‡BÂ6–ÆVçFÇ’–væ÷&–ær7bçFV×ÆFP¢òò‚3C3B’âöæÇ’Fbf–ÆÇ2FV×ÆFRÂ6òæ÷F†–ærVÇ6R—2f÷"F†RÆöö·Wà¢òòF†R&ö÷B—276VBÂæ÷B&RÖFW&—fVC¢&VÆF—fR4$TU%ôõ5õ$ôd”ÄR&W6öÇfW0¢òòv–ç7B—BÂæB&ö6W72æ7vB‚–†W&R—2Æ6÷&Sâ÷vV&‡6VR7b×FV×ÆFRæÖ§2’à¢òòF†RFF&ö÷BvöW2–âFöó¢FV×ÆFRg&öÒF†R6÷&Rw2W6W"Æ–W"‚3Sssr’Æ—fW0¢òòF†W&RÂ6ò—B—2æÖVB&VÆF—fRFòF†Rv÷&¶W"w27vBÂæ÷BF†R6†V6¶÷WBà¢6öç7BFF&ö÷BÒ¶–æBÓÓÒ'Fb"ò6&VW$÷5&ö÷B‚’¢VæFVf–æVC° ¢6öç7B7eFV×ÆFRÒFF&ö÷@¢òv—B&W6öÇfT7eFV×ÆFR†6öFU&ö÷BÂFF&ö÷B¢¢VæFVf–æVC° ¢6öç7BW6W%FV×ÆFW4F—"ÒFF&ö÷@¢òv—B&W6öÇfUW6W%FV×ÆFW4F—"†6öFU&ö÷BÂFF&ö÷B¢¢VæFVf–æVC°¢òò†öÆBF†RG&6¶W"wV&BF‡&÷Vv‚WfÇVF–öâW'6—7FVæ6RòDbÖ&¶–ærâ'V–Æ@¢òòF†R&ö×B–ç6–FRF†R6ÖRG'’6ò&W&F–öâf–ÇW&W2&VÆV6R—BFöòâ—B—0¢òòF¶Vâ&Vf÷&RF†R¤B&VfWF6‚Â6ò&÷rFVÆWFR6ææ÷BÆæB–âF†Bv–æF÷rà¢6öç7Bw&—FUFö¶VâÒ¶–æBÓÓÒ&WfÇVFR"ÇÂ¶–æBÓÓÒ'Fb"ò7V—&UG&6¶W%w&—FR‚’¢çVÆÃ°¢ÆWB6†–ÆC°¢ÆWB–ç7G'V7F–öäf–ÆS¢&WGW&åG—SÇG—Vöbw&—FTWfÇVF–öä–ç7G'V7F–öç3âÂVæFVf–æVC°¢ÆWB7–ÆÃ¢&WGW&åG—SÇG—Vöb7–ÆÄ÷fW'6—¦VE&ö×CâÂVæFVf–æVC°¢G'’°¢òò&VBF†R¤B†W&RÂæ÷B–âF†Rv÷&¶W#¢vV$fWF6‚G&÷267&—B6öçFVçBÂ6ò¢òò&ö&BF†B&VæFW'2—G2¤Bg&öÒ67&—BFFÆöö·2Æ–¶RâV×G’6†VÆÂFòF†P¢òòv÷&¶W"æBF†R'VâVæG22$æVVG2&Wf–Wr"öâÆ—fR÷7F–ærâçVÆÂ‡Æ–à¢òò&ö&G2Âç’Ö—72’ÆVfW2F†Rv÷&¶W"öâ—G2vV$fWF6‚F‚à¢6öç7B&VfWF6‚Ò¶–æBÓÓÒ&WfÇVFR"òv—B&VfWF6„¦B†–çWBÂ'Vä6÷&T6Æ’Â&Wç6–væÂ’¢çVÆÃ°¢òòF†R6ÆÆW"vVçBv’v†–ÆRF†R¤Bv2&V–ær&VC¢Fòæ÷B7F'Bv÷&¶W"f÷"æö&öG’à¢–b‡&Wç6–væÂæ&÷'FVB’°¢–b‡w&—FUFö¶VâÓÒçVÆÂ’&VÆV6UG&6¶W%w&—FR‡w&—FUFö¶Vâ“°¢&WGW&âæWr&W7öç6R†çVÆÂÂ²7FGW3¢C“’Ò“°¢Ğ¢òò'F–Â¤B×W7Bæ÷B.:ëËh‘éì¶»§q«^vYˆ
+]Ëœİ]\ÊHÙ[™
+È\Nˆœİ]\È‹X™[ˆ]‹œİ]\ÈJNÂˆËÈXØİ[][]Y›İ\ÜÚYÛ™Yˆ\ØYÙH]™[È\™H\‹]\›‹ÛÈİ™\Üš][™ÈXYHBˆËÈ][K]\›ˆ[ˆ™\ÜÛ›H]È\İ\›‹ˆH]]Üš]]]™H™Û™Hˆ\ÈÙ[ˆËÈÛˆÛÜÙKÛÈHÛ™\İHØ]HXÚY\ÈÛ™K]œËY\œ›Üˆš\œİ‚ˆ\İÚÙ[œÈHXØİ[][]UÚÙ[œÊ\İÚÙ[œË]ŠNÂˆYˆ
+\[Ùˆ]Ë˜ÛÜİ\ÙOOH›[X™\ˆŠH\İÛÜİ\ÙH]‹˜ÛÜİ\ÙÂˆYˆ
+]Ë™\œ›ÜŠHÂˆØ]Ñ\œ›ÜˆHYNÂˆÙ[™
+È\Nˆ™\œ›Üˆ‹\ÙÎˆ]‹™\œ›Ü‹œÛXÙJŒ
+HJNÂˆBˆNÂ‚ˆÚ[œİİ]›ÛŠ™]H‹
+Ú[šÎˆİš[™ÊHOˆÂˆYˆ
+ÛÜÙY
+H™]\›ÂˆYˆ
+\ÜXËœ\œÙQ]™[
+HÂˆ[Z]Y^HYNÂˆÙ[™YÙ[^
+Ú[šÊNÂˆ™]\›ÂˆBˆYˆ
+ÏHÚ[šÎÂˆ]›ˆ[X™\ÂˆÚ[H
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailoring + render is heavy and multi-step
+›HY‹š[™^ÙŠ—ˆŠJHOOHLJHÂˆÛÛœİ[™HHY‹œÛXÙJ›
+Kš[J
+NÂˆYˆHY‹œÛXÙJ›
+ÈJNÂˆYˆ
+[™JH›ØÙ\ÜÔ\œÙY[™J[™JNÂˆBˆJNÂˆÚ[œİ\œ‹›ÛŠ™]H‹
+Ú[šÎˆİš[™ÊHOˆÂˆËÈX]ÚÛˆÓÓTUH[™\ËˆHÚ[šÈ›İ[™\HØ[ˆ˜[ZY]ÛÜ™ÛÈ\İ[™ÈBˆËÈ˜]ÈÚ[šÈ›İZ\ÜÙ\È[ˆ\œ›ÜˆÜ]XÜ›ÜÜÈÛÈÙˆ[H[™Ø[ˆX]ÚBˆËÈœ˜YÛY[]\È›İHÛÜ™]ÛÚÜÈZÙKˆHØ\\™YÛš\]Û›BˆËÈİ\Y\ÈY\ÜØYÙH^›ÜˆÚXÚ]™\ˆ˜Z[\™HHÛÜÙH[™\ˆ[™XYBˆËÈXÚYYÛˆ8 %]™]™\ˆÙ]ÈØ]Ñ\œ›Üˆ]Ù[ˆ
+ÙYH›YÔİ\œ“[™HX›İ™JK‚ˆİ\œYˆ
+ÏHÚ[šÎÂˆ]›ÂˆÚ[H
 
-export async function POST(req: Request) {
-  const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown; evaluationSections?: unknown }>(req);
-  if (!body) return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
-  const { kind = "evaluate", input, cliId: requestedCliId, brief } = body;
-  const evaluation = kind === "evaluate" ? parseEvaluationOptions(body.evaluationSections) : undefined;
-  if (evaluation && !evaluation.ok) return Response.json({ error: evaluation.error }, { status: 400 });
-  if (!input || !requestedCliId) {
-    return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
-  }
-  const userData = careerOpsRoot();
-  if (!fs.existsSync(userData)) {
-    return new Response(JSON.stringify({ error: dataFolderMissingMessage(userData) }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-  const resolved = resolveCliOrFallback(requestedCliId);
-  if (!resolved) {
-    return new Response(JSON.stringify(cliUnavailableError(requestedCliId)), {
-      status: 404,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-  const { spec, binPath } = resolved;
-  // The CLI actually running: fencing, capabilities and argv below are keyed on it.
-  const cliId = spec.id;
-  const substitution = cliSubstitutionNotice(resolved);
-  const capabilities = capabilitiesFor(kind);
-  if (!isCliAllowedForCapabilities(cliId, capabilities)) {
-    return new Response(
-      JSON.stringify({ error: `CLI '${cliId}' cannot run write-capable worker '${kind}' without a verified permission adapter.` }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
-  }
+›Hİ\œY‹š[™^ÙŠ—ˆŠJHOOHLJHÂˆÛÛœİ[™HHİ\œY‹œÛXÙJ›
+NÂˆİ\œYˆHİ\œY‹œÛXÙJ›
+ÈJNÂˆ›YÔİ\œ“[™J[™JNÂˆBˆJNÂˆËÈ™[™\ˆ
+ÈX\šË]˜XÚÙ\‹\™XYH]™H[ˆ‹\™[™\‹›ZœÈ
+Z[‹\[™[˜ŞKBˆËÈ[š™XİY[š]]\İY
+HÛÈH™[™\‹][‹[X\šÈÜ˜Ú\İ˜][Ûˆ\Û‰İˆËÈ\šYY[\İY[œÚYH\È˜[œÜÜ[^Y\ˆÛÜİ\™Kˆ[œÈÙ[™\˜]KBˆËÈ‹›ZœÈ[™X\šË\‹\™XYK›ZœÈ\ÈZ[ˆ›ÙHÚ[›ØÙ\ÜÙ\È8 %›ÈYÙ[ˆËÈÓHÜˆ]ÈØ[™›Ş[›Û™Y8 %ÛÈHœ›İÜÙ\ˆ][˜Ú™]™\ˆ\[™ÈÛˆ[‚ˆËÈ[\˜Xİ]™H\›İ˜[›Ø›ÙH\È™\Ù[ÈÜ˜[[ˆHXY\ÜËİÙX‹BˆËÈšYÙÙ\™Y[ˆ
+ÌŒMÌŠKˆH˜XÚÙ\ˆ\ÈX\šÙY8§!HÛ›HY\ˆHÓÓ‘’T“QQˆËÈİXØÙ\ÜÙ[™[™\‹›İÜ[Z\İXØ[H8 %Ø[YHÛ™\İKYØ]H\ØÚ\[™H\ÂˆËÈ\œÚ\İ]˜[™[İË‚ˆÛÛœİ\œÚ\İ]˜[H\Ş[˜È
+X\šÙİÛˆİš[™ÊHOˆÂˆÙ[™
+È\Nˆœİ]\È‹X™[ˆ”Ø]š[™È™\Ü8 )ˆˆJNÂˆHÂˆÛÛœİ™\İ[H]ØZ]\œÚ\İ]˜[X][ÛŠÂˆÜ]Û‘›ˆÜ]Û‹ˆ^XÔ]ˆ›ØÙ\ÜË™^XÔ]ˆ›ÛİˆØ\™Y\“ÜÔ›Ûİ
 
-  // These run the REAL core (modes/scripts), not just data â€” fail clearly if the
-  // root is incomplete instead of faking it.
-  // The precondition must check the file the prompt will actually read. Pinning
-  // it to modes/oferta.md meant a configured market passed a check on a file the
-  // run never opens, and would have missed a market dir with no evaluation mode.
-  const lang = readLanguageConfig();
-  const needsScript: Record<string, string> = { evaluate: lang.evalModeFile, "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs", cover: "modes/cover.md" };
-  const required = needsScript[kind];
-  // Scripts and system modes live in the code checkout, which on a split-layout
-  // install is not the data root (cv.md, reports/ and output stay under that).
-  const codeRoot = resolveCodeRoot(process.cwd(), process.env);
-  // CAREER_OPS_ROOT is runtime user data, not a build input. Tracing this
-  // dynamic path would copy the whole web project into every server bundle.
-  const requiredPath = required
-    ? path.join(/* turbopackIgnore: true */ codeRoot, required)
-    : "";
-  if (required && !fs.existsSync(/* turbopackIgnore: true */ requiredPath)) {
-    return new Response(
-      JSON.stringify({
-        error: `This needs a complete career-ops checkout (${required}). The career-ops code checkout is incomplete â€” point CAREER_OPS_CODE_ROOT at a full checkout.`,
-      }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
-  }
+KˆÛÜ™T›Ûİˆ™\ÛÛ™PÛÙT›Ûİ
+›ØÙ\ÜË˜İÙ
 
-  // Assemble selected canonical instructions before any extraction or model call.
-  // Omitted work never becomes part of the worker's evaluation instructions.
-  let evaluationInstructions: string | null = null;
-  if (evaluation?.ok && !evaluation.full) {
-    try {
-      // modes/ and batch/ are system files: they live in the code checkout.
-      const root = codeRoot;
-      evaluationInstructions = selectedEvaluationInstructions({
-        mode: fs.readFileSync(/* turbopackIgnore: true */ requiredPath, "utf8"),
-        canonicalMode: fs.readFileSync(/* turbopackIgnore: true */ path.join(root, "modes/oferta.md"), "utf8"),
-        shared: fs.readFileSync(/* turbopackIgnore: true */ path.join(root, "modes/_shared.md"), "utf8"),
-        batch: fs.readFileSync(/* turbopackIgnore: true */ path.join(root, "batch/batch-prompt.md"), "utf8"),
-        sections: evaluation.sections,
-      });
-    } catch (error) {
-      console.error("[career-ops] Failed to load focused evaluation instructions:", error);
-      return Response.json({ error: "Could not load the selected evaluation instructions. No AI run was started." }, { status: 422 });
-    }
-  }
+K›ØÙ\ÜË™[ŠKˆX\šÙİÛ‹ˆ\›ˆ[œ]ˆÙ^KˆÜİY]ˆ]˜[X][Û”ÙXİ[ÛœÎˆ]˜[X][ÛË›ÚÈÈ]˜[X][Û‹œÙXİ[ÛœÈˆ[™Yš[™YˆJNÂˆYˆ
+\™\İ[›ÚÊHÂˆÙ[™
+È\Nˆ™\œ›Üˆ‹\ÙÎˆ™\İ[™\œ›Ü‹œÛXÙJML
+HJNÂˆ™]\›ÂˆBˆÙ[™Ø\›š[™ÜÊ™\İ[Ø\›š[™ÜÊNÂˆÛÛœİ™\ÜˆH[X™\Š™\İ[›[JNÂˆYˆ
+[X™\‹š\Ñš[š]J™\ÜŠJHÂˆÙ[™
+È\Nˆ™Û™H‹ÚÙ[œÎˆ\İÚÙ[œËÛÜİ\Ùˆ\İÛÜİ\Ù™\ÜˆJNÂˆH[ÙHÂˆÙ[™
+È\Nˆ™Û™H‹ÚÙ[œÎˆ\İÚÙ[œËÛÜİ\Ùˆ\İÛÜİ\ÙJNÂˆBˆHØ]Ú
+JHÂˆÙ[™
+È\Nˆ™\œ›Üˆ‹\ÙÎˆ]˜[X][Ûˆ\œÚ\İÜ˜\ÚY[™^XİYNˆ	ÙH[œİ[˜Ù[Ùˆ\œ›ÜˆÈK›Y\ÜØYÙHˆİš[™ÊJ_XœÛXÙJŒ
+HJNÂˆHš[˜[HÂˆÛÜÙJ
+NÂˆBˆNÂˆÛÛœİ™[™\”ˆH\Ş[˜È
+]Îˆ”]Ë›Ü›X]ˆ›]\ˆˆ˜MŠHOˆÂˆÙ[™
+È\Nˆœİ]\È‹X™[ˆ”™[™\š[™È¸ )ˆˆJNÂˆËÈ™[™\[™X\šÔˆ\È\ÚYÛ™YÈ™\ÛÛ™K™]™\ˆ›İÈ8 %]\È\ÂˆËÈHÛ™HXÙH›İ[™È[ÙH]ØZ]ÈÜˆØ]Ú\È\È›ÛZ\ÙH
+Ø[˜Ù[
 
-  // fix-portal's prompt puts this straight into a shell command the agent runs, and
-  // a company name can arrive from a public ATS listing rather than the user's own
-  // typing. Refuse rather than sanitize: a silently rewritten name would repair the
-  // wrong portal.
-  if (kind === "fix-portal" && !isShellSafeCompanyName(input)) {
-    return new Response(
-      JSON.stringify({ error: "That company name has characters I can't safely pass to the portal checker â€” rename it in portals.yml first." }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
-  }
+BˆËÈÛ›H]XÚ\ÈH™š[˜[H›ÜˆHÜš]K]ÚÙ[ˆ™[X\ÙJKÛÈ[‚ˆËÈ[™^XİY^Ù\[Ûˆ\™H]\İİ[ÛÜÙHHİ™X[H[œİXYÙ‚ˆËÈX]š[™È]8 %[™HÜš]K]ÚÙ[ˆ8 %Ü[ˆ[[›ØÙ\ÜÈÚ]İÛ‹‚ˆHÂˆÛÛœİ™\İ[H]ØZ]™[™\[™X\šÔŠÂˆÜ]Û‘›ˆÜ]Û‹ˆ^XÔ]ˆ›ØÙ\ÜË™^XÔ]ˆÛÜ™T›Ûİˆ™\ÛÛ™PÛÙT›Ûİ
+›ØÙ\ÜË˜İÙ
 
-  // An Aâ€“F score is meaningless without a CV to score against â€” the CLI would
-  // hallucinate a fit narrative and still emit a VERDICT. Require cv.md first.
-  if ((kind === "evaluate" || kind === "pdf" || kind === "cover") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
-    return new Response(
-      JSON.stringify({ error: "Add your CV first so I can score this against you â€” drop it on the home page." }),
-      { status: 400, headers: { "Content-Type": "application/json" } },
-    );
-  }
+K›ØÙ\ÜË™[ŠKˆ]T›ÛİˆØ\™Y\“ÜÔ›Ûİ
 
-  const today = localISODate();
+Kˆ”]Îˆ]Ëˆ›Ü›X]ˆ™\Ü[Nˆ]Ëœ™\Ü[KˆJNÂˆYˆ
+™\İ[šÚ[™OOHœ™[™\‹Y˜Z[YŠHÂˆÙ[™
+È\Nˆ™\œ›Üˆ‹\ÙÎˆ™\İ[™\œ›Ü‹œÛXÙJML
+HJNÂˆ™]\›ÂˆBˆËÈ›Û‹Y˜][\ÜİY\È
+HY˜][YYÙH›Ü›X]H˜XÚÙ\ˆ›İÈ›İX\šÙY
+Hİ[ˆËÈİ\™˜XÙH\™H˜]\ˆ[ˆÛ›H[ˆHÙ\™\ˆÙÈ›Ø›ÙHÙY\Ë‚ˆÙ[™Ø\›š[™ÜÊ™\İ[Ø\›š[™ÜÊNÂˆÙ[™
+È\Nˆ™Û™H‹ÚÙ[œÎˆ\İÚÙ[œËÛÜİ\Ùˆ\İÛÜİ\ÙJNÂˆHØ]Ú
+JHÂˆÙ[™
+È\Nˆ™\œ›Üˆ‹\ÙÎˆˆ™[™\š[™ÈÜ˜\ÚY[™^XİYNˆ	ÙH[œİ[˜Ù[Ùˆ\œ›ÜˆÈK›Y\ÜØYÙHˆİš[™ÊJ_XœÛXÙJŒ
+HJNÂˆHš[˜[HÂˆÛÜÙJ
+NÂˆBˆNÂ‚ˆÚ[›ÛŠ™\œ›Üˆ‹
+JHOˆÈÙ[™
+È\Nˆ™\œ›Üˆ‹\ÙÎˆK›Y\ÜØYÙHJNÈÛÜÙJ
+NÈJNÂˆÚ[›ÛŠ˜ÛÜÙH‹
+ÛÙJHOˆÂˆËÈH˜Z[[™È[™HÚ]›È™]Û[™HÛİ[İ\Ú\ÙH™]™\ˆ™H\İY‚ˆYˆ
+İ\œYŠHÈ›YÔİ\œ“[™Jİ\œYŠNÈİ\œYˆHˆÈBˆËÈH\ØÛÛ›™XİYÛY[]\İ›İİ\H™]Èˆ™[™\‹ˆİ[š[š\ÚˆËÈH[ˆ\™Nˆ[ˆ[œ]Y]YH˜Z[\™HÛÜÙ\ÈH˜[œÜÜÚ]İ]Ø[[™ÂˆËÈØ[˜Ù[
 
-  // Precompute deterministic scratch + final paths so the agent never chooses
-  // its own filenames â€” the backend owns naming, writing (#2185) and rendering
-  // (#2172). Nothing is cleared first: writeCvHtml rewrites the HTML
-  // from this run's freshly parsed envelope before any render, and the agent is
-  // no longer told these paths, so a stale file cannot survive into a render.
-  let pdfPaths: PdfPaths | undefined;
-  if (kind === "pdf") {
-    const pathsResult = resolvePdfPaths(input, today, careerOpsRoot(), findReportFile);
-    if (!pathsResult.ok) {
-      return new Response(JSON.stringify({ error: pathsResult.error }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    pdfPaths = pathsResult.paths;
-  }
+K[™]\İ›İX]™HH˜XÚÙ\ˆİX\™[›Ü™]™\‹‚ˆYˆ
+ÛÜÙY
+H™]\›ˆÛÜÙJ
+NÂˆËÈH[Y[İ]\ÈH“ÓÕØ]\ÙH™Z[™]™\H››È™\ÜÈ›İÛX[ˆ‚ˆËÈŞ[\ÛHHØ]\È™[İÈ\İÛÈÛ\ÜÚYH]’T”Õ›Üˆ[HÚ[™‚ˆËÈİ\Ú\ÙHH[ˆÙHİ]Ù™ˆ]H[YH[Z]™XYÈ\ÈHÓHÛİ[‰İˆËÈØ]™HH™\Üˆ[™Ù[™ÈH\Ù\ˆÈ™KXÚXÚÈHÓH]Ø\ÈÛÜšÚ[™ÂˆËÈš[™H
+ÌÌL
+KˆÛÙH\È[\™H
+Ú[YHÚYÛ˜[
+KÚXÚHØ]\ÂˆËÈÛİ[™XY\ÈHÙ[™\šXÈ›Û‹XÛX[ˆ^]‚ˆYˆ
+Ú[YU[Y[İ]
+HÂˆÙ[™
+Âˆ\Nˆ™\œ›Üˆ‹ˆ\ÙÎˆ[Y[İ]Y\ÜØYÙJÚ[\ËÚ[™
+KˆJNÂˆ™]\›ˆÛÜÙJ
+NÂˆBˆËÈHš[˜[”ÓÓ“[™HÚ]›È˜Z[[™È™]Û[™Hİ^\È[ˆY˜›Ü™]™\‚ˆËÈİ\Ú\ÙH8 %›\Ú]›İYÚHØ[YH\œÙ\ˆÛÈH\ØYÙKÜ™\İ[]™[]ˆËÈ\İX[HØ\œšY\È
+H\İÛ™HÙˆH[ŠH\Û‰İÜİˆZXYÙˆHˆœ˜[˜ÚˆËÈ›İ\İH]˜[X]HØ]NˆHˆ]™\ÜÈ\İÚÙ[œÈÛË‚ˆÛÛœİ˜Z[[™ÈHY‹š[J
+NÂˆYˆ
+˜Z[[™ÊHÂˆYˆHˆÂˆ›ØÙ\ÜÔ\œÙY[™J˜Z[[™ÊNÂˆBˆÛÛœİÛX[‘^]HÛÙHOOHÈËÈ›Û‹^™\›ÈÔˆ[
+Ú[YÜÚYÛ˜[
+HH“ÕÛX[‚ˆËÈÚ\™YH›İÛ™\İHØ]\È™[İÈ8 %HˆØ]H™XÙZ]™\È]\ÂˆËÈ”[“İ]ÛÛYIÜÈ›Óİ]]Y\ÜØYÙH8 %™XØ]\ÙHHÓH]›ÙXÙY›Èİ]]]ˆËÈ[\ÈHØ[YH˜Z[\™H[ÙHÚ]\ˆ]Ø\È]˜[X][™ÈÜˆZ[Üš[™ÂˆËÈHˆ8 %Û™HXÙH›ÜˆHÛÛ™][Û‹ÛY\ÜØYÙHZ\ˆ[œİXYÙˆÛË‚ˆÛÛœİ›Óİ]]Y\ÜØYÙHH
 
-  const coverRequest = kind === "cover" ? parseCoverRequest({ input, brief, root: careerOpsRoot(), findReportFile }) : undefined;
-  if (coverRequest && !coverRequest.ok) {
-    return new Response(JSON.stringify({ error: coverRequest.error }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+Nˆİš[™È[O‚ˆ›Óİ]]\œ›ÜŠÈ[Z]Y^Ø]Ñ\œ›Ü‹ÛX[‘^]İ\œ”Ûš\]ˆİ\œ‘\œ›Ü”Ûš\]JNÂ‚ˆYˆ
+Ú[™OOHœˆŠHÂˆËÈ™[X\ÙH[H^Hš[\ˆØ\Èİ[Û[™ËÛÈHÙÈÙY\ÈBˆËÈYÙ[	ÜÈÛÜÚ[™È˜\œ˜][Ûˆ[™]È‘T‘PÕ[™K‚ˆÛÛœİZ[Hİ‘š[\Ë™›\Ú
 
-  // Resolve the posting date HERE rather than asking the agent for it. The
-  // scanner already wrote it from the provider's own `offer.postedAt`, so this
-  // copies a recorded value instead of inviting a guess â€” and modes/oferta.md is
-  // explicit that a guessed date is worse than an absent one (the POSTED column
-  // renders absent as `â€”`, a wrong date as a fresh req). Unknown URL â†’ undefined
-  // â†’ report-persist writes no segment at all.
-  const postedAt =
-    kind === "evaluate"
-      ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
-      : undefined;
-  // Which CV template the worker fills. Resolved HERE, for the same reason `lang`
-  // is: the worker has no Bash (#2172), so it cannot run cv-templates.mjs and the
-  // prompt used to name the base template outright, silently ignoring cv.template
-  // (#4034). Only pdf fills a template, so nothing else pays for the lookup.
-  // The root is passed, not re-derived: a relative CAREER_OPS_PROFILE resolves
-  // against it, and `process.cwd()` here is `<core>/web` (see cv-template.mjs).
-  // The data root goes in too: a template from the core's user layer (#5777) lives
-  // there, so it is named relative to the worker's cwd, not the checkout.
-  const dataRoot = kind === "pdf" ? careerOpsRoot() : undefined;
+NÂˆYˆ
+Z[
+HÙ[™
+È\Nˆ^‹^ˆZ[JNÂˆËÈH\Y˜XİÚXÚÈ[İ™Yœ›ÛHHš[\Ş\İ[HÈHİ™X[H
+ÌŒNJN‚ˆËÈÚ]\ˆ”]Ëš[^\İÈØ^\È›İ[™È›İÈ]H˜XÚÙ[™\È]ÂˆËÈÛ›HÜš]\‹ˆ”[“İ]ÛÛYHİÛœÈHXÚ\Ú[Ûˆ[™HY\ÜØYÙK‚ˆÛÛœİ[™[ÜHHİ‘š[\Ëœ™\İ[
 
-  const cvTemplate = dataRoot
-    ? await resolveCvTemplate(codeRoot, dataRoot)
-    : undefined;
+NÂˆÛÛœİİ]ÛÛYHH”[“İ]ÛÛYJÂˆ[™[ÜKˆ›Óİ]]Y\ÜØYÙNˆ›Óİ]]Y\ÜØYÙJ
+KˆØ]Ñ\œ›Ü‹ˆÛX[‘^]ˆ\Ô]Îˆ”]ÈOOH[™Yš[™YˆJNÂˆYˆ
+[İ]ÛÛYK›ÚÊHÂˆÙ[™
+È\Nˆ™\œ›Üˆ‹\ÙÎˆİ]ÛÛYK›Y\ÜØYÙHJNÂˆH[ÙHYˆ
+\”]È[™[ÜOË›ÚÈOOHYJHÂˆËÈ[œ™XXÚX›Nˆ”[“İ]ÛÛYH˜[Y]Y›İšXH\Ô]ËÙ[™[ÜK›ÚË‚ˆËÈÙ\›Üˆ˜\œ›İÚ[™Ë]]]\İ‘TÔ•˜]\ˆ[ˆ˜[›İYÚÈBˆËÈ˜\™HÛÜÙJ
+H8 %Hİ™X[H][™ÈÚ]™Z]\ˆ\œ›Üˆ›ÜˆÛ™H\ÈBˆËÈÛ™Hİ]ÛÛYH\È[™\ˆ^\İÈÈ™]™[‚ˆÙ[™
+È\Nˆ™\œ›Üˆ‹\ÙÎˆ’[\›˜[\œ›ÜˆHˆ[ˆ\ÜÙY]ÈØ]HÚ]›ÈÕˆÈØ]™H8 %X\ÙH™\Ü\ËˆˆJNÂˆH[ÙHÂˆÙ[™Ø\›š[™ÜÊ[™[ÜKØ\›š[™ÜÊNÂˆYˆ
+Ø]™PİŠ”]Ë[™[ÜJJHÂˆËÈ˜XÚÙYÛÈØ[˜Ù[
 
-  const userTemplatesDir = dataRoot
-    ? await resolveUserTemplatesDir(codeRoot, dataRoot)
-    : undefined;
-  // Hold the tracker guard through evaluation persistence / PDF marking. Build
-  // the prompt inside the same try so preparation failures release it too. It is
-  // taken before the JD prefetch, so a row delete cannot land in that window.
-  const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
-  let child;
-  let instructionFile: ReturnType<typeof writeEvaluationInstructions> | undefined;
-  let spill: ReturnType<typeof spillOversizedPrompt> | undefined;
-  try {
-    // Read the JD here, not in the worker: WebFetch drops script content, so a
-    // board that renders its JD from script data looks like an empty shell to the
-    // worker and the run ends as "Needs review" on a live posting. null (plain
-    // boards, any miss) leaves the worker on its WebFetch path.
-    const prefetch = kind === "evaluate" ? await prefetchJd(input, runCoreCli, req.signal) : null;
-    // The caller went away while the JD was being read: do not start a worker for nobody.
-    if (req.signal.aborted) {
-      if (writeToken !== null) releaseTrackerWrite(writeToken);
-      return new Response(null, { status: 499 });
-    }
-    // A partial JD must not reach a worker that could score and save it as the
-    // whole posting, so refuse here instead of trusting the prompt to stop it.
-    if (isTruncatedJd(prefetch?.text)) {
-      if (writeToken !== null) releaseTrackerWrite(writeToken);
-      return Response.json({ error: "This posting is longer than the platform can read in full, so it was not scored. Evaluate it from your agent CLI with the job text pasted in (for example /career-ops, then paste the posting). No AI run was started." }, { status: 422 });
-    }
-    const prefetchedJd = prefetch?.text ?? null;
-    const closedEvidence = prefetch?.closedEvidence ?? null;
-    if (evaluationInstructions) {
-      instructionFile = writeEvaluationInstructions(careerOpsRoot(), evaluationInstructions);
-    }
-    const prompt = buildPrompt({
-      kind,
-      input,
-      memory: readMemory(),
-      today,
-      postedAt,
-      lang,
-      cvTemplate,
-      userTemplatesDir,
-      // The worker's cwd is the data root; modes, templates and scripts live in the checkout.
-      codeRoot,
-      reportFile: pdfPaths?.reportFile ?? (coverRequest?.ok ? coverRequest.reportFile : undefined),
-      coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
-      profile: profileRef(careerOpsRoot()),
-      evaluationInstructions: instructionFile?.reference,
-      prefetchedJd,
-      closedEvidence,
-    });
+HØ[ˆY™\ˆ™[X\Ú[™ÈÜš]UÚÙ[ˆ[[\ÂˆËÈÙ]\ÎÈÛÜÙJ
+H\[œÈÛ˜ÙH™[™\š[™Èš[š\Ú\Ë›İ\™K‚ˆ”™[™\”›ÛZ\ÙHH™[™\”Š”]Ë[™[ÜK™›Ü›X]
+NÂˆ™]\›ÂˆBˆËÈØ]™Pİˆ[™XYHİ™X[YYHÜXÚYšXÈ™X\ÛÛ‹‚ˆBˆ™]\›ˆÛÜÙJ
+NÂˆB‚ˆYˆ
+Ú[™OOH™]˜[X]HŠHÂˆÛÛœİZ[H™\Üš[\Ë™›\Ú
 
-    const isClaude = cliId === "claude";
-    // Which tools each kind gets, and the whole claude argv, live in
-    // claude-invocation.mjs â€” see its header for the policy and for why it is asserted on
-    // built values rather than on this file's source. NEVER auto-submits; that
-    // remains a prompt-level guarantee.
-    // Non-Claude CLIs get no tool flags from spec.args(), so permission for them is
-    // applied at the spawn boundary instead: spawnHeadlessCli takes what this kind
-    // needs (capabilitiesFor) and cli-fencing.mjs translates it for the chosen
-    // runtime â€” an OS sandbox on Codex, nothing yet on the runtimes with no
-    // verified mechanism. Those report level "none" and the run says so
-    // below, rather than looking identical to a fenced one (#2507).
-    // A CLI with its own structured stream gets the argv that turns it on, so its
-    // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
-    // envelope-parsing routes rely on.
-    const buildArgs = (p: string) =>
-      isClaude ? claudeCliArgs({ kind, prompt: p }) : (spec.streamArgs ?? spec.args)(p);
-    // The prompt inlines the whole _profile.md (#4003), so it can outgrow the OS
-    // command-line limit (ENAMETOOLONG on Windows). Every kind that reaches here
-    // can Read (see TOOL_SCOPES), so an oversized prompt goes to a file under the
-    // data root and argv carries a pointer to it. Prompts that fit are untouched.
-    spill = spillOversizedPrompt({
-      prompt,
-      buildArgs,
-      binPath,
-      fencing: { cliId, capabilities },
-      root: careerOpsRoot(),
-    });
-    child = spawnHeadlessCli(
-      binPath,
-      spill.args,
-      { cwd: careerOpsRoot(), env: process.env },
-      { cliId, capabilities },
-    );
-    if (instructionFile) child.once("close", instructionFile.cleanup);
-    if (spill.cleanup) child.once("close", spill.cleanup);
-  } catch (e) {
-    instructionFile?.cleanup();
-    spill?.cleanup?.();
-    // Fencing refuses an argv that contradicts the capability record, so nothing
-    // spawned and the stream below â€” which owns finishRun â€” is never
-    // constructed. Release the tracker guard HERE or it is held for the lifetime
-    // of the process and acquireTrackerWrite blocks every later evaluate/pdf run:
-    // a refused argv would take the tracker down with it.
-    if (writeToken !== null) releaseTrackerWrite(writeToken);
-    return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "failed to start the CLI" }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
-    );
-  }
-  // Decode once on the stream, not per chunk. Buffer#toString() decodes each chunk
-  // independently, so a chunk boundary falling inside a multi-byte UTF-8 sequence
-  // yields a replacement character and mis-decodes the bytes after it. Those bytes
-  // are the CV now (#2185) â€” the agent's HTML flows through cvFilter to
-  // writeCvHtml and on to the renderer â€” and no structural check would catch it,
-  // because the envelope markers and </html> are ASCII and still match. Setting
-  // the encoding makes Node hold partial sequences across chunks.
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  const enc = new TextEncoder();
+NÂˆYˆ
+Z[
+HÙ[™
+È\Nˆ^‹^ˆZ[JNÂˆÛÛœİ[™[ÜHH™\Üš[\Ëœ™\İ[
 
-  // Stream-lifetime state lives outside start() so cancel() (client disconnect)
-  // can stop every timer before the child's late handlers run. send() is also
-  // try/catch'd so a late enqueue cannot throw uncaught (see #1155).
-  let closed = false;
-  let killer: ReturnType<typeof setTimeout> | undefined;
-  let heartbeat: ReturnType<typeof setInterval> | undefined;
-  // pdf render and evaluate persist keep running after the agent child closes.
-  // cancel() must not release the tracker guard until that work settles.
-  let pdfRenderPromise: Promise<void> | null = null;
-  let evaluatePersistPromise: Promise<void> | null = null;
-  // Cancellation only requests termination. Keep the guard until the child
-  // actually closes and any render or persist work has finished.
-  const finishRun = createRunFinalizer(child, () => {
-    if (writeToken !== null) releaseTrackerWrite(writeToken);
-  });
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      let buf = "";
-      let emittedText = false; // any assistant text delta â†’ the CLI actually ran
-      // Set ONLY by an authoritative structured-stream signal (the ev.error branch
-      // in processParsedLine below) â€” never by flagStderrLine. A stderr keyword
-      // match is a guess, not a verdict; see stderrErrorSnippet.
-      let sawError = false;
-      let stderrBuf = "";
-      // Fallback for a CLI with no CliSpec.stderrIsFatal of its own. Moved into
-      // run-cli-support.mjs beside the per-CLI classifiers so it has a reachable
-      // test: as an inline regex in this closure nothing could assert it, which
-      // is how a bare `auth` came to match "Authentication successful" and mark a
-      // successful run as failed on six of the eight runtimes (#1974).
-      const isFatalStderr = spec.stderrIsFatal ?? isFatalGenericStderr;
-      // Snippet only, never fatality. isFatalStderr is a keyword guess over a
-      // CLI's own stderr chatter, not a verdict â€” trusting it to fail the run
-      // outright is exactly the bug #1974 reported: "Authentication successful"
-      // matched a bare `auth` and marked a clean, successful run as an error, on
-      // six of the eight runtimes. The close handler below is the sole place that
-      // decides fatality, from cleanExit and the CLI's own structured error event
-      // (authoritative â€” see the ev.error branch in processParsedLine); this only
-      // captures human-readable detail for whichever message that decision needs.
-      let stderrErrorSnippet: string | null = null;
-      const flagStderrLine = (line: string) => {
-        if (stderrErrorSnippet || !line.trim() || !isFatalStderr(line)) return;
-        stderrErrorSnippet = line.trim().slice(0, 200);
-      };
-      let lastTokens = 0; // per-run token cost from the CLI's structured usage event (#6) â€” local only
-      let lastCostUsd: number | null = null;
-      // pdf-mode's agent only tailors content now (rendering moved to the
-      // backend, #2172) â€” but its killMs still has to leave real headroom
-      // inside the route's overall maxDuration (800s): the render+mark phase
-      // (renderPdf, below) starts only after this timer's window and has no
-      // timeout of its own, so an agent that runs close to its full budget
-      // would otherwise leave the platform's hard maxDuration cutoff to kill
-      // generate-pdf.mjs mid-render. 600s agent / ~200s render is ample â€”
-      // a Chromium PDF render normally takes low tens of seconds even with a
-      // cold Playwright launch.
-      // pdf keeps 600s because its render+mark phase runs AFTER this timer; a
-      // plain evaluate has no such phase, so it can use almost the whole 800s
-      // budget. 285s was cutting real evaluations off mid-run â€” reading the mode
-      // and profile, fetching the posting, ~25 Bash calls and a few web searches
-      // routinely run past it â€” and the SIGTERM then surfaced as "didn't save a
-      // report" (see the close handler), blaming the CLI for a limit we imposed
-      // (#3124). 780s leaves ~20s under maxDuration for a graceful shutdown.
-      const killMs = killMsForKind(kind);
-      // Set by the killer so the close handler can tell "we timed it out" apart
-      // from "the CLI exited on its own" â€” different failures, different message.
-      let killedByTimeout = false;
-      killer = setTimeout(() => {
-        killedByTimeout = true;
-        try { child.kill("SIGTERM"); } catch { /* ignore */ }
-      }, killMs);
-      const send = (obj: unknown) => {
-        if (closed) return;
-        try {
-          controller.enqueue(enc.encode(JSON.stringify(obj) + "\n"));
-        } catch {
-          // The client is gone. Stop the heartbeat here rather than waiting for
-          // close(): the child can still run for minutes (maxDuration 800s), and
-          // a user retrying a failed run would otherwise accumulate one live
-          // timer per abandoned request.
-          closed = true;
-          if (heartbeat) clearInterval(heartbeat);
-        }
-      };
-      // Say so when the chosen runtime has no permission mechanism we can apply.
-      // Claude gets tool allow/deny lists and Codex an OS sandbox; the rest run
-      // with whatever they grant by default. Without this the two cases are
-      // indistinguishable in the UI, and a run that is not fenced reads exactly
-      // like one that is â€” which is the assumption #2507 was filed against.
-      //
-      // Sent as a status so it lands in job.steps, which the run detail page and
-      // the saved run log both render in full. The worker card shows only the
-      // latest step, so it also carries a sticky notice, matched via
-      // isFencingNotice() rather than a literal spelled in two files.
-      const fencing = fencingReport({ cliId, cliName: spec.name, capabilities: capabilitiesFor(kind) });
-      if (fencing.notice) send({ type: "status", label: fencing.notice });
-      if (substitution) send({ type: "status", label: substitution });
-      // Time-based keepalive. The stream is silent whenever the agent is thinking
-      // or inside a long tool call, and in pdf mode it is silent for the whole
-      // 15-25 KB <<cv-html>> envelope (cvFilter swallows every byte). Measured
-      // idle gaps on a real pdf run reached 149s â€” long enough for the browser or
-      // a proxy to drop the connection, after which the client reports
-      // "Connection error" even though the agent finished and the PDF rendered.
-      // It must be a timer, not a hook on incoming text: piggy-backing on agent
-      // output cannot fire during exactly the silences it needs to cover.
-      // Unknown event types are ignored by the client's switch, so old tabs are safe.
-      heartbeat = setInterval(() => send({ type: "keepalive" }), 10_000);
-      const close = () => {
-        // Resource cleanup is independent of whether the client can still read.
-        finishRun();
-        if (!closed) {
-          closed = true;
-          if (heartbeat) clearInterval(heartbeat);
-          if (killer) clearTimeout(killer);
-          try { controller.close(); } catch { /* */ }
-        }
-      };
-      // pdf's CV arrives inline in a <<cv-html>> envelope (#2185); evaluate's
-      // report arrives in a <<report-md>> envelope. The filter keeps every byte
-      // for the backend while holding the body out of the run log.
-      const cvFilter = kind === "pdf" ? createCvEnvelopeFilter() : null;
-      const reportFilter = kind === "evaluate" ? createReportEnvelopeFilter() : null;
-      // Assistant-authored text only, before report-body filtering. Tools/JDs
-      // cannot directly declare a gated outcome. Process integrity is checked
-      // first at close, before this text can be treated as a terminal stop.
-      let evaluationText = "";
-      // While the agent emits the 15-25 KB <<cv-html>> envelope, cvFilter swallows
-      // every byte, so the response stream goes completely silent for as long as
-      // the model takes to write the CV â€” a minute or more. Nothing downstream can
-      // tell that from a hung request, and the browser/proxy drops the connection;
-      // the client then reports "Connection error" even though the agent is fine
-      // and the PDF renders correctly server-side. Emit a throttled keepalive so
-      // the stream never idles during the filtered phase. Unknown event types are
-      // ignored by the client's switch, so this is safe for older tabs too.
-      const sendAgentText = (text: string) => {
-        if (kind === "evaluate") evaluationText += text;
-        const filter = cvFilter ?? reportFilter;
-        const visible = filter ? filter.push(text) : text;
-        if (visible) send({ type: "text", text: visible });
-      };
-      /** Surface non-fatal issues in the run log rather than only a server log. */
-      const sendWarnings = (warnings: string[]) => {
-        for (const w of warnings) send({ type: "text", text: `âš ï¸ ${w}\n` });
-      };
-      /** Persist the emitted CV; streams the reason and returns false on failure. */
-      const saveCv = (paths: PdfPaths, envelope: CvEnvelope) => {
-        const written = writeCvHtml({ pdfPaths: paths, html: envelope.html });
-        if (!written.ok) send({ type: "error", msg: written.error.slice(0, 200) });
-        return written.ok;
-      };
+NÂˆÛÛœİİ]ÛÛYHH]˜[X]T[“İ]ÛÛYJÂˆ[™[ÜKˆ›Óİ]]Y\ÜØYÙNˆ›Óİ]]Y\ÜØYÙJ
+KˆØ]Ñ\œ›Ü‹ˆÛX[‘^]ˆ^ˆ]˜[X][Û•^ˆJNÂˆYˆ
+[İ]ÛÛYK›ÚÊHÂˆÛÛœİ]™[H]˜[X][Û“İ]ÛÛYQ]™[
+İ]ÛÛYKÈÚÙ[œÎˆ\İÚÙ[œËÛÜİ\Ùˆ\İÛÜİ\ÙJNÂˆYˆ
+]™[
+HÙ[™
+]™[
+NÂˆH[ÙHYˆ
+[™[ÜOË›ÚÈOOHYJHÂˆÙ[™
+È\Nˆ™\œ›Üˆ‹\ÙÎˆ’[\›˜[\œ›ÜˆH]˜[X]H[ˆ\ÜÙY]ÈØ]HÚ]›È™\ÜÈØ]™H8 %X\ÙH™\Ü\ËˆˆJNÂˆH[ÙHÂˆ]˜[X]T\œÚ\İ›ÛZ\ÙHH\œÚ\İ]˜[
+[™[ÜK›X\šÙİÛŠNÂˆ™]\›ÂˆBˆ™]\›ˆÛÜÙJ
+NÂˆB‚ˆËÈÛ™\İHØ]H
+ÎJNˆHÜ™Y[ˆ™Û™HˆÚ]H\œÙYØÛÜ™H™\]Z\™\ÈHÓPSˆ^]ˆËÈ[™™X[İ]]ˆ[][™È[ÙH\Èİ\™˜XÙYˆ[ˆ\œ›Ü™Y[ˆ]\İ™]™\ˆ™BˆËÈ˜[šÙY\ÈHÛÛ™šY[ØÛÜ™K‚ˆÛÛœİ˜\ÙQ\œˆH›Óİ]]Y\ÜØYÙJ
+NÂˆYˆ
+˜\ÙQ\œŠHÂˆÙ[™
+È\Nˆ™\œ›Üˆ‹\ÙÎˆ˜\ÙQ\œˆJNÂˆH[ÙHYˆ
+XÛX[‘^]Ø]Ñ\œ›ÜŠHÂˆËÈ›ÙXÙYİ]]
+X^X™H]™[ˆH™\Ü
+H]Y“Õš[š\ÚÛX[›H8 %›YÈ]ˆËÈ[œİXYÙˆ™XÛÜ™[™ÈHÛÛ™šY[ØÛÜ™HÙ™ˆH[‹Yš[š\ÚY[‹ˆØ]Ñ\œ›Ü‚ˆËÈ\™HYX[œÈ[ˆ]]Üš]]]™HİXİ\™Y\œ›Üˆ[™XYHÙ[]ÈİÛ‚ˆËÈY\ÜØYÙHX›İ™NÈH˜\™H›Û‹XÛX[ˆ^]Ù]ÈHİ\œˆÛš\][œİXYˆËÈÚ[ˆH]\š\İXÈÛ\ÜÚYšY\ˆ›İ[™Û™K‚ˆÛÛœİ]Z[H\Ø]Ñ\œ›Üˆ	‰ˆİ\œ‘\œ›Ü”Ûš\]È
+	Üİ\œ‘\œ›Ü”Ûš\]JXˆˆÂˆÙ[™
+È\Nˆ™\œ›Üˆ‹\ÙÎˆ\È[ˆ][ˆ\œ›Üˆ™Y›Ü™Hš[š\Ú[™ËÛÈ]\Û‰İ™XÛÜ™Y\ÈHÛÛ™šY[™\İ[8 %™K\[ˆ]È™\šYK‰Ù]Z[XœÛXÙJŒ
+HJNÂˆH[ÙHÂˆÙ[™
+È\Nˆ™Û™H‹ÚÙ[œÎˆ\İÚÙ[œËÛÜİ\Ùˆ\İÛÜİ\ÙJNÂˆBˆÛÜÙJ
+NÂˆJNÂˆKˆØ[˜Ù[
 
-      // One dispatch for every structured CLI: the per-CLI knowledge (which event
-      // means text/tool/status/usage) lives in run-cli-support.mjs behind
-      // spec.parseEvent, so adding the next such CLI needs no change here.
-      // Shared with the close-time flush below, so a final JSONL line the CLI never
-      // newline-terminates before exiting isn't dropped along with the usage event
-      // it carries.
-      const joinAgentText = createAgentTextJoiner();
-      const processParsedLine = (line: string) => {
-        if (!spec.parseEvent) return;
-        const ev = spec.parseEvent(line);
-        const text = joinAgentText(ev);
-        if (text) {
-          emittedText = true;
-          // sendAgentText, NEVER send: pdf's CV arrives inside the agent's text as a
-          // <<cv-html>> envelope, so parsed text has to reach cvFilter too or the
-          // backend has nothing to save and the 25 KB body floods the run log (#2185).
-          sendAgentText(text);
-        }
-        if (ev?.tool) send({ type: "tool", name: ev.tool });
-        if (ev?.status) send({ type: "status", label: ev.status });
-        // Accumulated, not assigned: usage events are per-turn, so overwriting made a
-        // multi-turn run report only its last turn. The authoritative "done" is sent
-        // on close, so the honesty gate decides done-vs-error first.
-        lastTokens = accumulateTokens(lastTokens, ev);
-        if (typeof ev?.costUsd === "number") lastCostUsd = ev.costUsd;
-        if (ev?.error) {
-          sawError = true;
-          send({ type: "error", msg: ev.error.slice(0, 200) });
-        }
-      };
-
-      child.stdout.on("data", (chunk: string) => {
-        if (closed) return;
-        if (!spec.parseEvent) {
-          emittedText = true;
-          sendAgentText(chunk);
-          return;
-        }
-        buf += chunk;
-        let nl: number;
-        while ((nl = buf.indexOf("\n")) !== -1) {
-          const line = buf.slice(0, nl).trim();
-          buf = buf.slice(nl + 1);
-          if (line) processParsedLine(line);
-        }
-      });
-      child.stderr.on("data", (chunk: string) => {
-        // Match on COMPLETE lines. A chunk boundary can fall mid-word, so testing a
-        // raw chunk both misses an error split across two of them and can match a
-        // fragment that is not the word it looks like. The captured snippet only
-        // supplies message text for whichever failure the close handler already
-        // decided on â€” it never sets sawError itself (see flagStderrLine above).
-        stderrBuf += chunk;
-        let nl;
-        while ((nl = stderrBuf.indexOf("\n")) !== -1) {
-          const line = stderrBuf.slice(0, nl);
-          stderrBuf = stderrBuf.slice(nl + 1);
-          flagStderrLine(line);
-        }
-      });
-      // Render + mark-tracker-ready live in pdf-render.mjs (plain, dependency-
-      // injected, unit-tested) so the render-then-mark orchestration isn't
-      // buried untested inside this transport-layer closure. Runs generate-
-      // pdf.mjs and mark-pdf-ready.mjs as plain Node child processes â€” no agent
-      // CLI or its sandbox involved â€” so a browser launch never depends on an
-      // interactive approval nobody is present to grant in a headless/web-
-      // triggered run (#2172). The tracker is marked âœ… only after a CONFIRMED
-      // successful render, not optimistically â€” same honesty-gate discipline as
-      // persistEval below.
-      const persistEval = async (markdown: string) => {
-        send({ type: "status", label: "Saving reportâ€¦" });
-        try {
-          const result = await persistEvaluation({
-            spawnFn: spawn,
-            execPath: process.execPath,
-            root: careerOpsRoot(),
-            coreRoot: resolveCodeRoot(process.cwd(), process.env),
-            markdown,
-            url: input,
-            today,
-            postedAt,
-            evaluationSections: evaluation?.ok ? evaluation.sections : undefined,
-          });
-          if (!result.ok) {
-            send({ type: "error", msg: result.error.slice(0, 1500) });
-            return;
-          }
-          sendWarnings(result.warnings);
-          const reportN = Number(result.num);
-          if (Number.isFinite(reportN)) {
-            send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd, reportN });
-          } else {
-            send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
-          }
-        } catch (e) {
-          send({ type: "error", msg: `Evaluation persist crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
-        } finally {
-          close();
-        }
-      };
-      const renderPdf = async (paths: PdfPaths, format: "letter" | "a4") => {
-        send({ type: "status", label: "Rendering PDFâ€¦" });
-        // renderAndMarkPdf is designed to resolve, never throw â€” but this is
-        // the one place nothing else awaits or catches this promise (cancel()
-        // only attaches a .finally for the write-token release), so an
-        // unexpected exception here must still close the stream instead of
-        // leaving it â€” and the write-token â€” open until process shutdown.
-        try {
-          const result = await renderAndMarkPdf({
-            spawnFn: spawn,
-            execPath: process.execPath,
-            coreRoot: resolveCodeRoot(process.cwd(), process.env),
-            dataRoot: careerOpsRoot(),
-            pdfPaths: paths,
-            format,
-            reportNum: paths.reportNum,
-          });
-          if (result.kind === "render-failed") {
-            send({ type: "error", msg: result.error.slice(0, 1500) });
-            return;
-          }
-          // Non-fatal issues (a defaulted page format, a tracker row not marked) still
-          // surface here rather than only in a server log nobody sees.
-          sendWarnings(result.warnings);
-          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
-        } catch (e) {
-          send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
-        } finally {
-          close();
-        }
-      };
-
-      child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
-      child.on("close", (code) => {
-        // A trailing line with no newline would otherwise never be tested.
-        if (stderrBuf) { flagStderrLine(stderrBuf); stderrBuf = ""; }
-        // A disconnected client must not start a new PDF render. Still finish
-        // the run here: an enqueue failure closes the transport without calling
-        // cancel(), and must not leave the tracker guard held forever.
-        if (closed) return close();
-        // A timeout is the ROOT cause behind every "no report / not clean"
-        // symptom the gates below test, so classify it FIRST, for any kind.
-        // Otherwise a run we cut off at the time limit reads as "the CLI couldn't
-        // save a report" and sends the user to re-check a CLI that was working
-        // fine (#3124). code is null here (killed by signal), which the gates
-        // would read as a generic non-clean exit.
-        if (killedByTimeout) {
-          send({
-            type: "error",
-            msg: timeoutMessage(killMs, kind),
-          });
-          return close();
-        }
-        // A final JSONL line with no trailing newline stays in `buf` forever
-        // otherwise â€” flush it through the same parser so the usage/result event it
-        // usually carries (the last one of a run) isn't lost. Ahead of the pdf branch,
-        // not just the evaluate gate: the pdf path reports lastTokens too.
-        const trailing = buf.trim();
-        if (trailing) {
-          buf = "";
-          processParsedLine(trailing);
-        }
-        const cleanExit = code === 0; // non-zero OR null (killed/signal) = NOT clean
-        // Shared by both honesty gates below â€” the pdf gate receives it as
-        // pdfRunOutcome's noOutputMessage â€” because a CLI that produced no output at
-        // all is the same failure mode whether it was evaluating or tailoring
-        // a PDF â€” one place for the condition/message pair instead of two.
-        const noOutputMessage = (): string | null =>
-          noOutputError({ emittedText, sawError, cleanExit, stderrSnippet: stderrErrorSnippet });
-
-        if (kind === "pdf") {
-          // Release any text the filter was still holding, so the log keeps the
-          // agent's closing narration and its VERDICT line.
-          const tail = cvFilter?.flush();
-          if (tail) send({ type: "text", text: tail });
-          // The artifact check moved from the filesystem to the stream (#2185):
-          // whether pdfPaths.html exists says nothing now that the backend is its
-          // only writer. pdfRunOutcome owns the decision and the message.
-          const envelope = cvFilter?.result();
-          const outcome = pdfRunOutcome({
-            envelope,
-            noOutputMessage: noOutputMessage(),
-            sawError,
-            cleanExit,
-            hasPaths: pdfPaths !== undefined,
-          });
-          if (!outcome.ok) {
-            send({ type: "error", msg: outcome.message });
-          } else if (!pdfPaths || envelope?.ok !== true) {
-            // Unreachable: pdfRunOutcome validated both via hasPaths/envelope.ok.
-            // Kept for narrowing, but it must REPORT rather than fall through to a
-            // bare close() â€” a stream that ends with neither error nor done is the
-            // one outcome this handler exists to prevent.
-            send({ type: "error", msg: "Internal error: the pdf run passed its gate with no CV to save â€” please report this." });
-          } else {
-            sendWarnings(envelope.warnings);
-            if (saveCv(pdfPaths, envelope)) {
-              // Tracked so cancel() can defer releasing writeToken until this
-              // settles; close() happens once rendering finishes, not here.
-              pdfRenderPromise = renderPdf(pdfPaths, envelope.format);
-              return;
-            }
-            // saveCv already streamed the specific reason.
-          }
-          return close();
-        }
-
-        if (kind === "evaluate") {
-          const tail = reportFilter?.flush();
-          if (tail) send({ type: "text", text: tail });
-          const envelope = reportFilter?.result();
-          const outcome = evaluateRunOutcome({
-            envelope,
-            noOutputMessage: noOutputMessage(),
-            sawError,
-            cleanExit,
-            text: evaluationText,
-          });
-          if (!outcome.ok) {
-            const event = evaluationOutcomeEvent(outcome, { tokens: lastTokens, costUsd: lastCostUsd });
-            if (event) send(event);
-          } else if (envelope?.ok !== true) {
-            send({ type: "error", msg: "Internal error: the evaluate run passed its gate with no report to save â€” please report this." });
-          } else {
-            evaluatePersistPromise = persistEval(envelope.markdown);
-            return;
-          }
-          return close();
-        }
-
-        // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit
-        // and real output. Anything else is surfaced. An errored run must never be
-        // banked as a confident score.
-        const baseErr = noOutputMessage();
-        if (baseErr) {
-          send({ type: "error", msg: baseErr });
-        } else if (!cleanExit || sawError) {
-          // Produced output (maybe even a report) but did NOT finish cleanly â€” flag it
-          // instead of recording a confident score off a half-finished run. sawError
-          // here means an authoritative structured error already sent its own
-          // message above; a bare non-clean exit gets the stderr snippet instead,
-          // when the heuristic classifier found one.
-          const detail = !sawError && stderrErrorSnippet ? ` (${stderrErrorSnippet})` : "";
-          send({ type: "error", msg: `This run hit an error before finishing, so it isn't recorded as a confident result â€” re-run it to verify.${detail}`.slice(0, 200) });
-        } else {
-          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
-        }
-        close();
-      });
-    },
-    cancel() {
-      closed = true;
-      if (heartbeat) clearInterval(heartbeat);
-      if (killer) clearTimeout(killer);
-      try { child.kill("SIGTERM"); } catch { /* ignore */ }
-      const followup = pdfRenderPromise ?? evaluatePersistPromise;
-      if (followup) {
-        // Render/mark or evaluate persist keeps running after this client
-        // disconnects. Wait for it before releasing the guard, so a concurrent
-        // tracker delete cannot race the still-in-flight write.
-        followup.finally(finishRun);
-      } else {
-        finishRun();
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      "X-Accel-Buffering": "no",
-    },
-  });
-}
+HÂˆÛÜÙYHYNÂˆYˆ
+X\™X]
+HÛX\’[\˜[
+X\™X]
+NÂˆYˆ
+Ú[\ŠHÛX\•[Y[İ]
+Ú[\ŠNÂˆHÈÚ[šÚ[
+”ÒQÕT“HŠNÈHØ]ÚÈÊˆYÛ›Ü™H
+‹ÈBˆÛÛœİ›Ûİİ\H”™[™\”›ÛZ\ÙHÏÈ]˜[X]T\œÚ\İ›ÛZ\ÙNÂˆYˆ
+›Ûİİ\
+HÂˆËÈ™[™\‹ÛX\šÈÜˆ]˜[X]H\œÚ\İÙY\È[›š[™ÈY\ˆ\ÈÛY[ˆËÈ\ØÛÛ›™XİËˆØZ]›Üˆ]™Y›Ü™H™[X\Ú[™ÈHİX\™ÛÈHÛÛ˜İ\œ™[ˆËÈ˜XÚÙ\ˆ[]HØ[››İ˜XÙHHİ[Z[‹Y›YÚÜš]K‚ˆ›Ûİİ\™š[˜[Jš[š\Ú[ŠNÂˆH[ÙHÂˆš[š\Ú[Š
+NÂˆBˆKˆJNÂ‚ˆ™]\›ˆ™]È™\ÜÛœÙJİ™X[KÂˆXY\œÎˆÂˆÛÛ[U\Hˆ^ÜZ[ÈÚ\œÙ]]]‹N‹ˆØXÚKPÛÛ›Ûˆ››ËXØXÚK›Ë]˜[œÙ›Ü›H‹ˆ–PXØÙ[PY™™\š[™Èˆ››È‹ˆKˆJNÂŸB
