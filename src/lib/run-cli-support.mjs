@@ -1,7 +1,7 @@
 // Plain .mjs (same pattern as tracker-table.mjs/clean-chips.mjs/spawn-cli.mjs)
 // so tests/lib/run-cli-support.test.mjs can import it directly under Node. Import it
 // with the .mjs extension included (e.g. "@/lib/run-cli-support.mjs" or
-// "./run-cli-support.mjs") — unlike .ts files, which TypeScript resolves
+// "./run-cli-support.mjs") â€” unlike .ts files, which TypeScript resolves
 // without an extension, ESM specifiers for plain JS modules must be fully
 // specified.
 import { isReservedReportFile } from "./report-files.mjs";
@@ -12,7 +12,7 @@ import { claudeUsageTokens } from "./claude-usage.mjs";
  * Usually at most one payload field (`tool`/`text`/`tokens`/`costUsd`/`error`) is
  * set per event; `status` may accompany any of them, and `tokens`/`costUsd` may
  * co-occur on a Claude `result` event.
- * `costUsd` is `number | null`: null is a REPORTED absence, not a missing field —
+ * `costUsd` is `number | null`: null is a REPORTED absence, not a missing field â€”
  * Codex sends usage with no cost, and callers must not fill that in with a rate.
  * `tokensAreTotal` marks a CLI whose usage frame carries the RUN TOTAL rather
  * than one turn's delta. It exists because the two conventions are not
@@ -23,32 +23,32 @@ import { claudeUsageTokens } from "./claude-usage.mjs";
  */
 
 const STATUS_READY = "Agent ready";
-const STATUS_RECONNECTING = "Reconnecting…";
+const STATUS_RECONNECTING = "Reconnectingâ€¦";
 
 /**
- * Token accounting across CLIs — the two conventions are OPPOSITE, and the
+ * Token accounting across CLIs â€” the two conventions are OPPOSITE, and the
  * formula is the only place that difference is visible (adapted from #2689,
  * which reached this from the accounting side).
  *
- * The dashboard's Claude metric is TOTAL TOKEN ACTIVITY — input + output +
+ * The dashboard's Claude metric is TOTAL TOKEN ACTIVITY â€” input + output +
  * cache creation + cache reads. Cache reads are discounted, so this is a
  * context-volume signal rather than a dollar-cost estimate. `/api/usage` and
  * this per-run parser share `claudeUsageTokens` so those totals cannot drift.
  *
  *   Claude  `input_tokens` EXCLUDES cache reads (they live in
  *           `cache_read_input_tokens`), and cache writes are separate too.
- *           → input + output + cache_creation + cache_read
+ *           â†’ input + output + cache_creation + cache_read
  *   Codex   `input_tokens` INCLUDES `cached_input_tokens` (OpenAI's
  *           convention), so adding is double-counting and the cached portion
- *           must be SUBTRACTED. → (input − cached) + output
+ *           must be SUBTRACTED. â†’ (input âˆ’ cached) + output
  *
- * Getting this wrong throws nothing and reddens no test — it silently inflates
- * one runtime against another (~4.7× on a real run) in the very comparison
+ * Getting this wrong throws nothing and reddens no test â€” it silently inflates
+ * one runtime against another (~4.7Ã— on a real run) in the very comparison
  * people use to control cost.
  */
 
 /**
- * A usage figure, or 0 — guards nulls and junk in a partial usage block.
+ * A usage figure, or 0 â€” guards nulls and junk in a partial usage block.
  *
  * `isSafeInteger`, not `isFinite`: a token count is a whole number, so a
  * fractional value from a malformed event is junk and must not reach the total
@@ -65,15 +65,15 @@ function tokenCount(value) {
 const FATAL_AUTH_STDERR_RE =
   /unauthorized|forbidden|not authenticated|please log in|sign[ -]?in required|credential.*missing/i;
 
-/** Quota/rate-limit failures — fatal like auth, EXCEPT when the line announces
+/** Quota/rate-limit failures â€” fatal like auth, EXCEPT when the line announces
  * its own retry: the CLI is handling it, and the run can still complete
- * cleanly. Same reasoning as CODEX_TRANSIENT_ERROR_RE, for the stderr channel —
+ * cleanly. Same reasoning as CODEX_TRANSIENT_ERROR_RE, for the stderr channel â€”
  * flagging a self-retrying 429 fatal re-creates the false-red #2085 exists to
  * remove (sawError fails the honesty gate even on exit 0 with a written
  * report). Auth gets no such carve-out: it never heals by retrying. */
 const FATAL_QUOTA_STDERR_RE = /quota|rate limit/i;
 // Only a retry the CLI ANNOUNCES AS IN PROGRESS ("retrying", "retry in 5s",
-// "will retry") — a bare /retry/ would also match terminal wording like
+// "will retry") â€” a bare /retry/ would also match terminal wording like
 // "do not retry" or "retry limit exhausted" and silence a genuine failure.
 const RETRYING_STDERR_RE = /retrying|retry\s+in\b|will\s+retry/i;
 const isFatalQuotaStderr = (line) => FATAL_QUOTA_STDERR_RE.test(line) && !RETRYING_STDERR_RE.test(line);
@@ -89,7 +89,7 @@ const CODEX_TRANSIENT_ERROR_RE = /reconnect/i;
  *
  * Codex can emit benign ERROR-level diagnostics (e.g. a stale local model-cache
  * schema) and still complete successfully, so anything outside the auth/quota
- * set is left to its JSONL stream and exit code — and even a quota/rate-limit
+ * set is left to its JSONL stream and exit code â€” and even a quota/rate-limit
  * line is non-fatal while it says the CLI is retrying.
  *
  * @param {string} line
@@ -104,7 +104,7 @@ export function isFatalCodexStderr(line) {
  *
  * Same reasoning as `isFatalCodexStderr`: Claude also has a structured stream
  * and a meaningful exit code, so the generic "contains the word error" fallback
- * would fail runs that actually succeeded — and a self-retrying rate limit gets
+ * would fail runs that actually succeeded â€” and a self-retrying rate limit gets
  * the same transient carve-out. Claude's own wording (invalid key, /login,
  * credit/usage limits) is always hard: none of those heal by retrying.
  *
@@ -119,16 +119,16 @@ export function isFatalClaudeStderr(line) {
  * Fallback classifier for a CLI with no `stderrIsFatal` of its own.
  *
  * Only claude and codex define one, so SIX of the eight entries in KNOWN reach
- * this path — including every runtime people pick to spend less than they would
+ * this path â€” including every runtime people pick to spend less than they would
  * on those two.
  *
  * The terms are ANCHORED. Unanchored, `auth` matched inside ordinary words and a
  * successful run got reported as failed because a word appeared:
  *
- *   "Authentication successful"   → fatal    ← a SUCCESS message
- *   "warning: no author found"    → fatal    ← "auth" inside "author"
- *   "fetching author metadata"    → fatal
- *   "Errors: 0"                   → fatal
+ *   "Authentication successful"   â†’ fatal    â† a SUCCESS message
+ *   "warning: no author found"    â†’ fatal    â† "auth" inside "author"
+ *   "fetching author metadata"    â†’ fatal
+ *   "Errors: 0"                   â†’ fatal
  *
  * That is the same failure #2085 exists to remove, on the path #2102 left
  * untouched. Found by @gregaro in #1974.
@@ -136,7 +136,7 @@ export function isFatalClaudeStderr(line) {
  * Anchoring, NOT narrowing: `not authenticated` and `authentication failed`
  * still match, and the multi-word phrases keep no `\b` because they cannot
  * collide with prose. Lives here rather than inline in route.ts so it can be
- * tested — the reason the drift went unnoticed is that a regex in a .ts closure
+ * tested â€” the reason the drift went unnoticed is that a regex in a .ts closure
  * had no reachable test.
  *
  * @param {string} line
@@ -155,7 +155,7 @@ const GENERIC_FATAL_STDERR_RE =
  * Lives beside that parser rather than inline in clis.ts because the two are one
  * contract: `--json` is what produces the events, and `--color never` keeps ANSI
  * escapes out of the JSON strings. A caller that wants plain text must use
- * `CliSpec.args` instead — every non-dashboard surface reads codex's stdout
+ * `CliSpec.args` instead â€” every non-dashboard surface reads codex's stdout
  * directly (`<<offer:>>`/`<<cv:>>` envelopes, the apply planners' JSON array).
  *
  * @param {string} prompt
@@ -178,7 +178,7 @@ export function parseCodexEvent(line) {
     return null;
   }
   // JSON.parse("null") SUCCEEDS and yields null, and a bare scalar line yields a
-  // number or string — none of which the try above rejects, so reading `.type`
+  // number or string â€” none of which the try above rejects, so reading `.type`
   // off them throws past this function into the stdout handler. A parser written
   // to survive hostile input has to survive its own success cases too.
   if (!event || typeof event !== "object") return null;
@@ -202,7 +202,7 @@ export function parseCodexEvent(line) {
     // Newline-terminate each message: Codex sends complete messages with NO
     // trailing newline ("hello", not "hello\n"), so consecutive messages would
     // otherwise concatenate mid-line downstream. That glued narration into one
-    // run-on log line AND broke pdf mode outright — the <<cv-html>> markers are
+    // run-on log line AND broke pdf mode outright â€” the <<cv-html>> markers are
     // line-anchored by design (cv-envelope.mjs, fail-closed), so an envelope
     // message following unterminated narration parsed as "no envelope" and the
     // honesty gate failed a run whose CV was fully emitted.
@@ -211,7 +211,7 @@ export function parseCodexEvent(line) {
   }
 
   if (event.type === "turn.completed") {
-    // No `usage` block means nothing to report — return null rather than a
+    // No `usage` block means nothing to report â€” return null rather than a
     // {tokens: 0}, so the caller's `typeof === "number"` guard skips it instead
     // of clobbering a correct running total from an earlier turn.
     if (!event.usage) return null;
@@ -220,14 +220,14 @@ export function parseCodexEvent(line) {
     // Clamped at 0 so a malformed usage block can never report negative tokens.
     const fresh = Math.max(0, tokenCount(usage.input_tokens) - tokenCount(usage.cached_input_tokens));
     // costUsd stays null rather than being invented from a token count and a
-    // guessed rate — Codex reports no cost, and a fabricated one reads as real.
+    // guessed rate â€” Codex reports no cost, and a fabricated one reads as real.
     return { tokens: fresh + tokenCount(usage.output_tokens), costUsd: null };
   }
 
   if (event.type === "turn.failed" || event.type === "error") {
     const message = String(event.error?.message || event.message || "Codex failed before finishing");
     // `turn.failed` is terminal by definition, but a bare `error` event also
-    // carries transient conditions Codex recovers from — a "Reconnecting..."
+    // carries transient conditions Codex recovers from â€” a "Reconnecting..."
     // notice mid-run would otherwise flag the whole run as failed even though
     // the turn goes on to complete. Report it as progress, not as an error.
     if (event.type === "error" && CODEX_TRANSIENT_ERROR_RE.test(message)) return { status: STATUS_RECONNECTING };
@@ -269,19 +269,19 @@ export function parseClaudeEvent(line) {
   }
 
   if (ev.type === "result") {
-    // Usage first, so a FAILED result still reports what it burned — the tokens
+    // Usage first, so a FAILED result still reports what it burned â€” the tokens
     // were spent either way, and dropping them undercounts exactly the runs a
     // user most wants to see the cost of.
     const result = {};
     if (ev.usage) {
-      // Addition here, subtraction for Codex — see the header note. This shared
+      // Addition here, subtraction for Codex â€” see the header note. This shared
       // helper keeps the per-run total identical to /api/usage.
       result.tokens = claudeUsageTokens(ev.usage);
       if (typeof ev.total_cost_usd === "number") result.costUsd = ev.total_cost_usd;
     }
     // A terminal failure, the counterpart of parseCodexEvent's turn.failed. The
     // route's gate would otherwise have to infer this from the exit code alone,
-    // and a non-zero exit is not guaranteed — a run that failed while exiting 0
+    // and a non-zero exit is not guaranteed â€” a run that failed while exiting 0
     // would be banked as a confident score, the dishonest-success case this
     // whole file exists to prevent. `is_error` is the authoritative flag;
     // subtype is checked by PREFIX because the real values are
@@ -313,7 +313,7 @@ export function parseClaudeEvent(line) {
  * 1. **`end` carries the turn TOTAL, not a delta.** `usage` frames arrive
  *    first and `end` reports the whole run, so summing them adds the parts to
  *    the whole. Both kinds are emitted with `tokensAreTotal` so the fold takes
- *    the latest — keeping the intermediates means a run killed mid-flight
+ *    the latest â€” keeping the intermediates means a run killed mid-flight
  *    still records something rather than zero.
  * 2. **`thought` is dropped.** It carries chain-of-thought; forwarding it would
  *    put reasoning in the report pane and, worse, mark a run as having produced
@@ -345,7 +345,7 @@ export function parseGrokEvent(line) {
 
   if (ev.type === "usage" || ev.type === "end") {
     const usage = ev.usage;
-    // No usage block means nothing to report — null rather than {tokens: 0}, so
+    // No usage block means nothing to report â€” null rather than {tokens: 0}, so
     // the fold's `typeof === "number"` guard skips it instead of zeroing a
     // total an earlier frame already established.
     if (!usage || typeof usage !== "object") return null;
@@ -389,7 +389,7 @@ export function accumulateTokens(current, ev) {
 
 /**
  * Completed report filenames from a raw `reports/` listing.
- * Reservation sentinels are not completed reports — `isReservedReportFile` is
+ * Reservation sentinels are not completed reports â€” `isReservedReportFile` is
  * the single definition of that convention, shared with career-ops.ts.
  *
  * @param {string[]} entries
@@ -401,7 +401,7 @@ export function completedReportNames(entries) {
 
 /**
  * Whether `afterEntries` contains a completed report name absent from
- * `beforeEntries` — i.e. persistence actually happened, as opposed to a
+ * `beforeEntries` â€” i.e. persistence actually happened, as opposed to a
  * `NNN-RESERVED.md` sentinel merely being replaced or churned.
  * @param {string[]} beforeEntries
  * @param {string[]} afterEntries
@@ -458,8 +458,8 @@ export function killMsForKind(kind) {
 export function noOutputError({ emittedText, sawError, cleanExit, stderrSnippet }) {
   if (emittedText || sawError) return null;
   const detail = stderrSnippet ? ` (${stderrSnippet})` : "";
-  if (!cleanExit) return `The CLI exited with an error — is it installed and authenticated?${detail}`;
-  return `The CLI produced no output — is it installed and authenticated?${detail} (career-ops is best on Claude Code.)`;
+  if (!cleanExit) return `The CLI exited with an error â€” is it installed and authenticated?${detail}`;
+  return `The CLI produced no output â€” is it installed and authenticated?${detail} (career-ops is best on Claude Code.)`;
 }
 
 // Message for a run the route stopped at its own time limit. It names the limit,
@@ -467,7 +467,7 @@ export function noOutputError({ emittedText, sawError, cleanExit, stderrSnippet 
 // a report": a timeout and a CLI that couldn't write are different failures, and
 // blaming the CLI sends the user to re-check the wrong thing (#3124).
 export function timeoutMessage(killMs, kind) {
-  return `This run passed the ${Math.round(killMs / 1000)}s time limit and was stopped before it could finish — re-run it, or run a very long ${kind} on Claude Code directly. The CLI was working; we cut it off, so it isn't recorded as a result.`;
+  return `This run passed the ${Math.round(killMs / 1000)}s time limit and was stopped before it could finish â€” re-run it, or run a very long ${kind} on Claude Code directly. The CLI was working; we cut it off, so it isn't recorded as a result.`;
 }
 
 /**
